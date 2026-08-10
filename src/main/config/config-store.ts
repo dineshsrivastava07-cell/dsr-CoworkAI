@@ -232,7 +232,7 @@ const defaultProfiles: Record<ProviderProfileKey, ProviderProfile> = {
   ollama: {
     apiKey: '',
     baseUrl: 'http://localhost:11434/v1',
-    model: '',
+    model: 'gemma4:27b',
   },
   gemini: {
     apiKey: '',
@@ -258,11 +258,11 @@ const defaultProfiles: Record<ProviderProfileKey, ProviderProfile> = {
 
 const defaultConfigSet: ApiConfigSet = {
   id: DEFAULT_CONFIG_SET_ID,
-  name: '默认方案',
+  name: 'Default (Ollama)',
   isSystem: true,
-  provider: 'openrouter',
-  customProtocol: 'anthropic',
-  activeProfileKey: 'openrouter',
+  provider: 'ollama',
+  customProtocol: 'openai',
+  activeProfileKey: 'ollama',
   profiles: defaultProfiles,
   enableThinking: false,
   updatedAt: '1970-01-01T00:00:00.000Z',
@@ -270,10 +270,10 @@ const defaultConfigSet: ApiConfigSet = {
 
 const defaultConfig: AppConfig = {
   provider: defaultConfigSet.provider,
-  apiKey: defaultProfiles.openrouter.apiKey,
-  baseUrl: defaultProfiles.openrouter.baseUrl,
+  apiKey: defaultProfiles.ollama.apiKey,
+  baseUrl: defaultProfiles.ollama.baseUrl,
   customProtocol: defaultConfigSet.customProtocol,
-  model: defaultProfiles.openrouter.model,
+  model: defaultProfiles.ollama.model,
   activeProfileKey: defaultConfigSet.activeProfileKey,
   profiles: defaultProfiles,
   activeConfigSetId: DEFAULT_CONFIG_SET_ID,
