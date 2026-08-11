@@ -134,8 +134,58 @@ flowchart LR
     Reg --> SH[Shell / Bash]
     Reg --> BR[Browser / Puppeteer]
     Reg --> GH[GitHub MCP]
+    Reg --> OT[Office Tools MCP\ncreate_excel\ncreate_word_document\ncreate_presentation]
     Reg --> CUS[Custom MCP servers]
-    FS & SH & BR & GH & CUS -->|result| AR
+    FS & SH & BR & GH & OT & CUS -->|result| AR
+```
+
+---
+
+## Office Document Generation Flow
+
+```mermaid
+flowchart TD
+    U([User request]) --> AR[AgentRunner]
+    AR -->|tool_use: create_excel\ncreate_word_document\ncreate_presentation| OTS[Office Tools MCP Server\noffice-tools-server.ts]
+
+    OTS --> XL{Tool?}
+    XL -- create_excel --> EXJ[ExcelJS\nWorkbook builder]
+    XL -- create_word_document --> DCX[docx library\nDocument builder]
+    XL -- create_presentation --> PPT[PptxGenJS\nPresentation builder]
+
+    EXJ -->|styled headers\nzebra rows\nSUM totals\nfrozen panes| XLSX[.xlsx file]
+    DCX -->|headings H1-H3\nbullet lists\ntables\npage breaks| DOCX[.docx file]
+    PPT -->|cover slide\nDSR master theme\nspeaker notes| PPTX[.pptx file]
+
+    XLSX & DOCX & PPTX -->|saved to Desktop\nor WORKSPACE_DIR| FS[(Filesystem)]
+    FS -->|file path returned| AR
+    AR --> U
+```
+
+---
+
+## macOS Native Addon Signing Flow
+
+```mermaid
+flowchart TD
+    NI([npm install]) --> PI[postinstall hook]
+    PI --> DLN[download-node.js]
+    PI --> REB[npm rebuild\nbetter-sqlite3]
+    PI --> SGN[sign-native.sh]
+
+    S001 --> FIND[Find all .node addons\nin node_modules]
+    FIND --> SIGN[/usr/bin/codesign\n--sign - \n--entitlements electron-entitlements.plist]
+    SIGN --> ADDON1[better-sqlite3.node]
+    SIGN --> ADDON2[clipboard.darwin-universal.node]
+    SIGN --> ADDON3[keytar.node]
+    SIGN --> ADDONN[... all .node files]
+
+    SGN --> EAPP[Sign Electron.app\ninside-out order]
+    EAPP --> DY[Dylibs & Frameworks]
+    DY --> HLP[Helper apps\nEtEXT Renderer\nEtEXT GPU]
+    HLP --> MAIN2[Electron.app main bundle]
+
+    ADDON1 & ADDON2 & ADDON3 & ADDONN & MAIN2 -->|ad-hoc signed\nJIT + memory entitlements| OK([App launches on macOS 26 Tahoe])
 ```
 
 ---
@@ -194,21 +244,25 @@ erDiagram
 
 ## Technology Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Desktop shell | Electron 41 |
-| UI framework | React 1<0xA0>18 + Vite 7 |
-| Styling | Tailwind CSS 3 |
-| State | Zustand |
-| Local LLM | Ollama + Gemma 4 (27b / e4b) |
-| Auth | Gemini OAuth (Google Identity) |
-| IPC | Electron contextBridge (preload) |
-| Persistence | electron-store (encrypted) + SQLite (better-sqlite3) |
-| MCP | @modelcontextprotocol/client + server |
-| Sandbox (macOS) | Lima VM |
-| Sandbox (Windows) | WSL2 |
-| Remote | Slack Bolt SDK + ngrok |
-| Language | TypeScript 5 |
+| Layer               | Technology                                           |
+| ------------------- | ---------------------------------------------------- |
+| Desktop shell       | Electron 41                                          |
+| UI framework        | React 18 + Vite 7                                    |
+| Styling             | Tailwind CSS 3                                       |
+| State               | Zustand                                              |
+| Local LLM           | Ollama + Gemma 4 (27b / e4b)                         |
+| Auth                | Gemini OAuth (Google Identity)                       |
+| IPC                 | Electron contextBridge (preload)                     |
+| Persistence         | electron-store (encrypted) + SQLite (better-sqlite3) |
+| MCP                 | @modelcontextprotocol/client + server                |
+| Office — Excel      | ExcelJS 4.4                                          |
+| Office — Word       | docx 9.7                                             |
+| Office — PowerPoint | PptxGenJS 4.0                                        |
+| Sandbox (macOS)     | Lima VM                                              |
+| Sandbox (Windows)   | WSL2                                                 |
+| Remote              | Slack Bolt SDK + ngrok                               |
+| Code signing        | /usr/bin/codesign (ad-hoc, entitlements plist)       |
+| Language            | TypeScript 5                                         |
 
 ---
 
@@ -220,6 +274,9 @@ src/
 │   ├── agent/          AgentRunner — streams LLM, dispatches tools
 │   ├── config/         ConfigStore, auth-utils (Ollama + Gemini OAuth)
 │   ├── mcp/            MCP server lifecycle, tool registry
+│   │   ├── mcp-manager.ts          Server lifecycle + tool dispatch
+│   │   ├── gui-operate-server.ts   GUI automation (29 tools)
+│   │   └── office-tools-server.ts  Office doc generation (3 tools)
 │   ├── memory/         SQLite-backed memory (short + long term)
 │   ├── remote/         Slack channel, ngrok tunnel
 │   ├── sandbox/        Lima agent (macOS), WSL agent (Windows)
@@ -234,9 +291,14 @@ src/
 └── shared/
     ├── ipc-types.ts    IPC channel type contracts
     └── api-model-presets.ts  Provider/model definitions
+
+scripts/
+├── bundle-mcp.js               esbuild bundles for MCP servers
+├── sign-native.sh              Ad-hoc signing of .node addons (macOS 26)
+└── electron-entitlements.plist JIT + memory entitlements for Electron
 ```
 
 ---
 
-*dsr-CoworkAI — Developed by DSR AI Lab*
-*github.com/dineshsrivastava07-cell/dsr-CoworkAI*
+_dsr-CoworkAI — Developed by DSR AI Lab_
+_github.com/dineshsrivastava07-cell/dsr-CoworkAI_

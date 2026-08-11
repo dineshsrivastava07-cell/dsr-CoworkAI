@@ -307,10 +307,8 @@ export class MCPManager {
     const bundledNode = this.getBundledNodePath();
     if (!bundledNode) {
       const errorMessage =
-        'Bundled Node.js not found. Please reinstall the application.\n' +
-        '未找到内置的 Node.js。请重新安装应用。\n\n' +
-        'The application requires bundled Node.js to run MCP servers.\n' +
-        '应用需要内置的 Node.js 来运行 MCP 服务器。';
+        'Bundled Node.js not found. Please reinstall the application.\n\n' +
+        'The application requires bundled Node.js to run MCP servers.';
 
       logError('[MCPManager] Bundled Node.js not found');
       throw new Error(errorMessage);
@@ -730,6 +728,13 @@ export class MCPManager {
   }
 
   /**
+   * Get the path to the Office Tools MCP server file
+   */
+  private getOfficeToolsServerPath(): string {
+    return this.getMcpServerPath('office-tools-server.ts');
+  }
+
+  /**
    * Connect to a single MCP server
    */
   private async connectServer(config: MCPServerConfig): Promise<void> {
@@ -787,7 +792,9 @@ export class MCPManager {
         config.name === 'GUI_Operate' ||
         config.name === 'GUI Operate' ||
         config.name === 'Software_Development' ||
-        config.name === 'Software Development';
+        config.name === 'Software Development' ||
+        config.name === 'Office_Tools' ||
+        config.name === 'Office Tools';
       const isOldConfig =
         (command === 'npx' || command.endsWith('/npx')) &&
         args.includes('-y') &&
@@ -814,6 +821,9 @@ export class MCPManager {
         // GUI Operate server path
         if (arg === '{GUI_OPERATE_SERVER_PATH}') {
           return this.getGuiOperateServerPath();
+        }
+        if (arg === '{OFFICE_TOOLS_SERVER_PATH}') {
+          return this.getOfficeToolsServerPath();
         }
         return arg;
       });

@@ -31,6 +31,11 @@ const servers = [
     entry: 'software-dev-server-example.ts',
     description: 'Software Development MCP Server',
   },
+  {
+    name: 'office-tools-server',
+    entry: 'office-tools-server.ts',
+    description: 'Office Tools MCP Server (Excel, Word, PowerPoint)',
+  },
 ];
 
 const NODE_EXTERNALS = [

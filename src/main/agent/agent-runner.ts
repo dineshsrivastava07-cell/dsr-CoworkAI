@@ -1194,10 +1194,10 @@ ${hints.join('\n')}
 
     const controller = new AbortController();
     try {
-      // SDK 会在同一 AbortSignal 上挂载较多监听器，放开上限避免无意义告警干扰排错。
+      // SDK mounts many listeners on the same AbortSignal; raise limit to avoid spurious warnings.
       setMaxListeners(0, controller.signal);
     } catch {
-      // 旧运行时不支持 EventTarget 调整监听上限时忽略即可。
+      // Older runtimes may not support adjusting EventTarget listener limits; ignore if so.
     }
     this.activeControllers.set(session.id, controller);
 
@@ -1984,7 +1984,7 @@ ${hints.join('\n')}
               const serverKey = config.name;
 
               if (config.type === 'stdio') {
-                // 当命令是 npx 或 node 时优先使用内置路径
+                // Prefer bundled path when command is npx or node
                 const command =
                   config.command === 'npx' && bundledNpx
                     ? bundledNpx
@@ -1992,7 +1992,7 @@ ${hints.join('\n')}
                       ? bundledNodePaths.node
                       : config.command;
 
-                // 使用内置 npx/node 时，将内置 node bin 注入 PATH
+                // When using bundled npx/node, inject bundled node bin into PATH
                 const serverEnv = { ...config.env };
                 if (bundledNodePaths && (config.command === 'npx' || config.command === 'node')) {
                   const nodeBinDir = path.dirname(bundledNodePaths.node);
@@ -2111,22 +2111,24 @@ This is an isolated sandbox environment. Use ${VIRTUAL_WORKSPACE_PATH} as the ro
 </your_configuration>`;
 
       const coworkAppendPrompt = [
-        'You are an Open Cowork assistant. Be concise, accurate, and tool-capable.',
+        'You are dsr-CoworkAI, an AI assistant by DSR AI Lab. Be concise, accurate, and tool-capable. Always deliver direct output — never suggest scripts or workarounds when a tool can produce the result immediately.',
         `CRITICAL BEHAVIORAL RULES:
-1. CHAT FIRST: By default, respond to the user in plain text within the conversation. Do NOT create, write, or edit files unless the user explicitly asks you to (e.g., "create a file", "write this to...", "edit the code", "save as...", mentions a specific file path, or describes code changes they want applied). For questions, summaries, explanations, analysis, and general conversation — always reply directly in chat text.
-2. When a request is actionable, proceed immediately with reasonable assumptions. If you need clarification, ask briefly in plain text.
-3. For relative time windows like "within two days" in browsing or research tasks, assume the most recent two relevant publication days unless the user explicitly defines another date range.
-4. For bracketed placeholders like [Agent], [Topic], etc., treat the word inside brackets as the literal search keyword unless the user says otherwise.
-5. When given a task, START DOING IT. Do not restate the task, do not list what you will do, do not ask for confirmation. Just execute.`,
+1. DIRECT OUTPUT ALWAYS: When the user asks you to create a file, document, spreadsheet, presentation, image, or any artifact — produce it immediately using the appropriate MCP tool. Do NOT suggest Python scripts, shell commands, or workarounds. Do NOT ask "Would you like me to...". Just call the tool and deliver the file.
+2. CHAT FIRST for non-actionable requests: For questions, summaries, explanations, and general conversation — reply directly in chat text.
+3. When a request is actionable, proceed immediately with reasonable assumptions. If you need clarification, ask briefly in plain text.
+4. For relative time windows like "within two days" in browsing or research tasks, assume the most recent two relevant publication days unless the user explicitly defines another date range.
+5. For bracketed placeholders like [Agent], [Topic], etc., treat the word inside brackets as the literal search keyword unless the user says otherwise.
+6. When given a task, START DOING IT. Do not restate the task, do not list what you will do, do not ask for confirmation. Just execute.`,
         configSummaryPrompt,
         workspaceInfoPrompt,
         `<citation_requirements>
-If your answer uses linkable content from MCP tools, include a "Sources:" section and otherwise use standard Markdown links: [Title](https://claude.ai/chat/URL).
+If your answer uses linkable content from MCP tools, include a "Sources:" section and otherwise use standard Markdown links.
 </citation_requirements>`,
         `<tool_behavior>
 Tool routing:
-- If user explicitly asks to use Chrome/browser/web navigation, prioritize Chrome MCP tools (mcp__Chrome__*) over generic WebSearch/WebFetch.
-- Use WebSearch/WebFetch only when Chrome MCP is unavailable or the user explicitly asks for generic web search.
+- OFFICE DOCUMENTS: When the user asks to create an Excel spreadsheet (.xlsx), Word document (.docx), or PowerPoint presentation (.pptx) — immediately call the corresponding Office Tools MCP tool: mcp__Office_Tools__create_excel, mcp__Office_Tools__create_word_document, or mcp__Office_Tools__create_presentation. Pass the user's content requirements as tool arguments. Return the saved file path. Never suggest openpyxl, python-docx, or any Python library instead.
+- CHROME/BROWSER: If user asks to use Chrome/browser/web navigation, prioritize Chrome MCP tools (mcp__Chrome__*) over generic WebSearch/WebFetch.
+- WEB SEARCH: Use WebSearch/WebFetch only when Chrome MCP is unavailable or the user explicitly asks for generic web search.
 </tool_behavior>`,
         this.getBundledPathHints(),
       ]
@@ -2944,7 +2946,12 @@ Tool routing:
           id: uuidv4(),
           sessionId: session.id,
           role: 'assistant',
-          content: [{ type: 'text', text: '**请求超时**：长时间未收到响应，操作已中止。' }],
+          content: [
+            {
+              type: 'text',
+              text: '**Request timed out**: no response received, operation aborted.',
+            },
+          ],
           timestamp: Date.now(),
         };
         this.sendMessage(session.id, errorMsg);
@@ -2987,7 +2994,12 @@ Tool routing:
             id: uuidv4(),
             sessionId: session.id,
             role: 'assistant',
-            content: [{ type: 'text', text: '**请求超时**：长时间未收到响应，操作已中止。' }],
+            content: [
+              {
+                type: 'text',
+                text: '**Request timed out**: no response received, operation aborted.',
+              },
+            ],
             timestamp: Date.now(),
           };
           this.sendMessage(session.id, errorMsg);
