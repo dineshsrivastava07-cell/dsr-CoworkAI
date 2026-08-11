@@ -3,19 +3,19 @@ layout: home
 head:
   - - link
     - rel: canonical
-      href: https://opencoworkai.github.io/open-cowork/
+      href: https://dineshsrivastava07-cell.github.io/dsr-CoworkAI/
   - - link
     - rel: alternate
       hreflang: en
-      href: https://opencoworkai.github.io/open-cowork/
+      href: https://dineshsrivastava07-cell.github.io/dsr-CoworkAI/
   - - link
     - rel: alternate
       hreflang: zh-CN
-      href: https://opencoworkai.github.io/open-cowork/zh/
+      href: https://dineshsrivastava07-cell.github.io/dsr-CoworkAI/zh/
   - - link
     - rel: alternate
       hreflang: x-default
-      href: https://opencoworkai.github.io/open-cowork/
+      href: https://dineshsrivastava07-cell.github.io/dsr-CoworkAI/
 
 hero:
   name: Open Cowork
@@ -27,10 +27,10 @@ hero:
   actions:
     - theme: brand
       text: Download
-      link: https://github.com/OpenCoworkAI/open-cowork/releases
+      link: https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/releases
     - theme: alt
       text: View on GitHub
-      link: https://github.com/OpenCoworkAI/open-cowork
+      link: https://github.com/dineshsrivastava07-cell/dsr-CoworkAI
 
 features:
   - icon: 🚀
@@ -135,11 +135,11 @@ features:
 **macOS (Homebrew)**
 
 ```bash
-brew tap OpenCoworkAI/tap
-brew install --cask --no-quarantine open-cowork
+brew tap dineshsrivastava07-cell/tap
+brew install --cask --no-quarantine dsr-coworkai
 ```
 
-**Windows / macOS** — [Download from Releases →](https://github.com/OpenCoworkAI/open-cowork/releases)
+**Windows / macOS** — [Download from Releases →](https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/releases)
 
 </div>
 
@@ -191,7 +191,7 @@ Open Cowork runs entirely on your local machine. The only external communication
 
 ### Does it work on Linux?
 
-Pre-built installers are available for Windows and macOS. Linux users can build from source — see the [GitHub repository](https://github.com/OpenCoworkAI/open-cowork) for instructions.
+Pre-built installers are available for Windows and macOS. Linux users can build from source — see the [GitHub repository](https://github.com/dineshsrivastava07-cell/dsr-CoworkAI) for instructions.
 
 </div>
 

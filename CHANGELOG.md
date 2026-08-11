@@ -124,10 +124,10 @@ First stable release of the 3.3.x series. Graduated from 9 beta releases with 30
 
 - Initial release of Open Cowork — open-source AI agent desktop app with one-click install for Windows and macOS
 
-[Unreleased]: https://github.com/OpenCoworkAI/open-cowork/compare/v3.3.0-beta.8...HEAD
-[3.3.0-beta.8]: https://github.com/OpenCoworkAI/open-cowork/compare/v3.2.0...v3.3.0-beta.8
-[3.2.0]: https://github.com/OpenCoworkAI/open-cowork/compare/v3.1.0...v3.2.0
-[3.1.0]: https://github.com/OpenCoworkAI/open-cowork/compare/v3.0.0...v3.1.0
-[3.0.0]: https://github.com/OpenCoworkAI/open-cowork/compare/v2.0.0...v3.0.0
-[2.0.0]: https://github.com/OpenCoworkAI/open-cowork/compare/v1.0...v2.0.0
-[1.0.0]: https://github.com/OpenCoworkAI/open-cowork/releases/tag/v1.0
+[Unreleased]: https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/compare/v3.3.0-beta.8...HEAD
+[3.3.0-beta.8]: https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/compare/v3.2.0...v3.3.0-beta.8
+[3.2.0]: https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/compare/v3.1.0...v3.2.0
+[3.1.0]: https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/compare/v3.0.0...v3.1.0
+[3.0.0]: https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/compare/v2.0.0...v3.0.0
+[2.0.0]: https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/compare/v1.0...v2.0.0
+[1.0.0]: https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/releases/tag/v1.0

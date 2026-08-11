@@ -3,19 +3,19 @@ layout: home
 head:
   - - link
     - rel: canonical
-      href: https://opencoworkai.github.io/open-cowork/zh/
+      href: https://dineshsrivastava07-cell.github.io/dsr-CoworkAI/zh/
   - - link
     - rel: alternate
       hreflang: en
-      href: https://opencoworkai.github.io/open-cowork/
+      href: https://dineshsrivastava07-cell.github.io/dsr-CoworkAI/
   - - link
     - rel: alternate
       hreflang: zh-CN
-      href: https://opencoworkai.github.io/open-cowork/zh/
+      href: https://dineshsrivastava07-cell.github.io/dsr-CoworkAI/zh/
   - - link
     - rel: alternate
       hreflang: x-default
-      href: https://opencoworkai.github.io/open-cowork/
+      href: https://dineshsrivastava07-cell.github.io/dsr-CoworkAI/
 
 hero:
   name: Open Cowork
@@ -27,10 +27,10 @@ hero:
   actions:
     - theme: brand
       text: 立即下载
-      link: https://github.com/OpenCoworkAI/open-cowork/releases
+      link: https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/releases
     - theme: alt
       text: GitHub 仓库
-      link: https://github.com/OpenCoworkAI/open-cowork
+      link: https://github.com/dineshsrivastava07-cell/dsr-CoworkAI
 
 features:
   - icon: 🚀
@@ -172,11 +172,11 @@ features:
 **macOS (Homebrew)**
 
 ```bash
-brew tap OpenCoworkAI/tap
-brew install --cask --no-quarantine open-cowork
+brew tap dineshsrivastava07-cell/tap
+brew install --cask --no-quarantine dsr-coworkai
 ```
 
-**Windows / macOS** — [前往下载页面 →](https://github.com/OpenCoworkAI/open-cowork/releases)
+**Windows / macOS** — [前往下载页面 →](https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/releases)
 
 </div>
 
@@ -228,7 +228,7 @@ Open Cowork 完全在本地运行，你的文件保留在你的工作区内。�
 
 ### 支持 Linux 吗？
 
-目前提供 Windows 和 macOS 的预构建安装包。Linux 用户可以通过源码编译方式使用，详见 [GitHub 仓库](https://github.com/OpenCoworkAI/open-cowork)。
+目前提供 Windows 和 macOS 的预构建安装包。Linux 用户可以通过源码编译方式使用，详见 [GitHub 仓库](https://github.com/dineshsrivastava07-cell/dsr-CoworkAI)。
 
 </div>
 

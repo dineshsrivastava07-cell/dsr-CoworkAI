@@ -99,19 +99,19 @@ Extract core into a package that works without the Electron binary at all (for D
 
 ```bash
 # Single-shot: send prompt, get result, exit
-open-cowork --headless -p "list all files in src/" --cwd ~/project
+dsr-coworkai --headless -p "list all files in src/" --cwd ~/project
 
 # JSONL streaming: pipe events for processing
-open-cowork --headless --mode json -p "refactor this function" | jq '.type'
+dsr-coworkai --headless --mode json -p "refactor this function" | jq '.type'
 
 # RPC mode: bidirectional, for agent-to-agent
-open-cowork --headless --mode rpc
+dsr-coworkai --headless --mode rpc
 
 # Auto-approve all tool calls (for trusted automation)
-open-cowork --headless --auto-approve -p "fix the failing tests"
+dsr-coworkai --headless --auto-approve -p "fix the failing tests"
 
 # Claude Code integration test
-echo '{"type":"session.start","prompt":"what model are you?"}' | open-cowork --headless --mode rpc
+echo '{"type":"session.start","prompt":"what model are you?"}' | dsr-coworkai --headless --mode rpc
 ```
 
 ### Estimated Scope
@@ -232,7 +232,7 @@ src/main/subagent/
    - Token usage aggregation (child usage reported back to parent's UI)
 
 4. **Agent definitions** (Phase 2):
-   - Discover from `~/.opencowork/agents/*.md` (user) and `.opencowork/agents/*.md` (project)
+   - Discover from `~/.dsr-coworkai/agents/*.md` (user) and `.dsr-coworkai/agents/*.md` (project)
    - Frontmatter: `name`, `description`, `model`, `tools`, body = system prompt
    - Security: project-local agents require confirmation (untrusted prompts)
 
@@ -446,7 +446,7 @@ New:      timer fires → checkCondition() → changed? → yes: startSession()
 - [ ] Subagent UI: inline expansion in chat vs. separate panel vs. both?
 - [ ] Should compact custom instructions be per-session, per-workspace, or global?
 - [ ] Polling check interval minimum (to prevent abuse / runaway costs)?
-- [ ] Headless mode: should `--headless` be the Electron binary or a separate `open-cowork-cli` package?
+- [ ] Headless mode: should `--headless` be the Electron binary or a separate `dsr-coworkai-cli` package?
 - [ ] Should these be separate issues or tracked as sub-tasks of this roadmap?
 
 ---

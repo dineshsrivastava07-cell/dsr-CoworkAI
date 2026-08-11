@@ -1,6 +1,6 @@
-# 🗺️ Open Cowork Roadmap
+# dsr-CoworkAI Roadmap
 
-> This document outlines the development direction for Open Cowork. For feature requests and discussion, see [GitHub Issues](https://github.com/OpenCoworkAI/open-cowork/issues).
+> This document outlines the development direction for dsr-CoworkAI. For feature requests and discussion, see [GitHub Issues](https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/issues).
 
 ## ✅ Completed
 
