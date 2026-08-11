@@ -185,7 +185,7 @@ function generateExcelFromDescription(description: string, filename?: string): C
   const type = detectDocType(description);
   const d = description.toLowerCase();
   const isStationery =
-    /stationar|office supply|pen|pencil|paper|notebook|folder|binder|marker|eraser/.test(d);
+    /stationer|office suppl|pen|pencil|paper|notebook|folder|binder|marker|eraser/.test(d);
   const fname = filename || slugify(description) || 'document';
 
   if (type === 'invoice') {
@@ -1419,6 +1419,74 @@ async function createPresentation(params: CreatePresentationParams): Promise<str
   return outFile;
 }
 
+// ─── AI-Powered Dynamic Content Generation ───────────────────────────────────
+
+/**
+ * Calls Ollama (gemma4:e4b) to generate document content from a description.
+ * Returns the raw JSON string, or null if the call fails / returns non-JSON.
+ * The caller must parse and validate before use; template generators are the fallback.
+ */
+async function callOllamaForContent(
+  description: string,
+  docType: 'excel' | 'word' | 'ppt'
+): Promise<string | null> {
+  const systemPrompts: Record<string, string> = {
+    excel: `You are a data analyst. Generate Excel spreadsheet data as JSON.
+Return ONLY valid JSON, no markdown fences, no explanation.
+Schema: {"sheets":[{"name":"SheetName","headers":["Col1","Col2","Col3"],"rows":[["val","val",0]],"freeze_header":true,"add_totals":false}]}
+Rules:
+- Include specific realistic data (real names, numbers, dates — NOT placeholders like "Item 1")
+- At least 8–15 data rows per main sheet
+- Add a Summary/Totals sheet when appropriate (invoices, budgets, sales)
+- Row values must align with headers in order`,
+
+    word: `You are a professional writer. Generate Word document content as JSON.
+Return ONLY valid JSON, no markdown fences, no explanation.
+Schema: {"title":"Title","blocks":[{"type":"paragraph","heading":"Section","heading_level":1,"text":"Actual content here"},{"type":"bullet_list","items":["Point 1","Point 2"]},{"type":"table","table":{"headers":["Col"],"rows":[["Val"]]}}]}
+Block types: paragraph | bullet_list | numbered_list | table | page_break
+heading_level: 1, 2, or 3
+Write real professional content — no placeholder or bracket text.
+Include at least 5 sections with substantive information.`,
+
+    ppt: `You are a presentation designer. Generate PowerPoint slide content as JSON.
+Return ONLY valid JSON, no markdown fences, no explanation.
+Schema: {"title":"Presentation Title","subtitle":"Subtitle","slides":[{"layout":"content","title":"Slide Title","bullets":["Specific point 1","Specific point 2"]},{"layout":"table","title":"Data","table":{"headers":["Col A","Col B"],"rows":[["val","val"]]}},{"layout":"two_column","title":"Compare","left_bullets":["Left 1"],"right_bullets":["Right 1"]}]}
+Layout options: content (title+bullets) | table (title+table) | two_column (title+left_bullets+right_bullets) | blank
+Write specific informative bullets — not generic placeholders.
+Include 5–7 slides. Cover slide is auto-generated; start with content slides.`,
+  };
+
+  try {
+    const resp = await fetch('http://localhost:11434/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: process.env.OLLAMA_MODEL || 'gemma4:e4b',
+        messages: [
+          { role: 'system', content: systemPrompts[docType] },
+          { role: 'user', content: `Create: ${description}` },
+        ],
+        stream: false,
+        options: { temperature: 0.35, num_predict: 3000 },
+      }),
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const content = data.choices?.[0]?.message?.content ?? '';
+    // Strip markdown fences and extract the first JSON object
+    const stripped = content.replace(/```(?:json)?[\s\S]*?```/g, (m: string) =>
+      m.replace(/```(?:json)?|```/g, '')
+    );
+    const match = stripped.match(/\{[\s\S]*\}/);
+    return match ? match[0] : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── MCP Server ─────────────────────────────────────────────────────────────
 
 function createMcpServer() {
@@ -1716,7 +1784,22 @@ function createMcpServer() {
           let params: CreateExcelParams;
           if (!raw.sheets || raw.sheets.length === 0) {
             const desc = raw.description || raw.filename || 'spreadsheet';
-            params = generateExcelFromDescription(desc, raw.filename);
+            const fname = raw.filename || slugify(desc) || 'spreadsheet';
+            const aiJson = await callOllamaForContent(desc, 'excel');
+            if (aiJson) {
+              try {
+                const aiData = JSON.parse(aiJson) as Partial<CreateExcelParams>;
+                if (Array.isArray(aiData.sheets) && aiData.sheets.length > 0) {
+                  params = { filename: fname, sheets: aiData.sheets };
+                } else {
+                  params = generateExcelFromDescription(desc, raw.filename);
+                }
+              } catch {
+                params = generateExcelFromDescription(desc, raw.filename);
+              }
+            } else {
+              params = generateExcelFromDescription(desc, raw.filename);
+            }
             if (raw.output_dir) params.output_dir = raw.output_dir;
           } else {
             params = raw as unknown as CreateExcelParams;
@@ -1739,9 +1822,29 @@ function createMcpServer() {
           let params: CreateWordParams;
           if (!raw.blocks || raw.blocks.length === 0) {
             const desc = raw.description || raw.title || raw.filename || 'document';
-            params = generateWordFromDescription(desc, raw.filename);
+            const fname = raw.filename || slugify(desc) || 'document';
+            const aiJson = await callOllamaForContent(desc, 'word');
+            if (aiJson) {
+              try {
+                const aiData = JSON.parse(aiJson) as Partial<CreateWordParams>;
+                if (Array.isArray(aiData.blocks) && aiData.blocks.length > 0) {
+                  params = {
+                    filename: fname,
+                    title: aiData.title,
+                    blocks: aiData.blocks,
+                    author: raw.author,
+                  };
+                } else {
+                  params = generateWordFromDescription(desc, raw.filename);
+                }
+              } catch {
+                params = generateWordFromDescription(desc, raw.filename);
+              }
+            } else {
+              params = generateWordFromDescription(desc, raw.filename);
+            }
             if (raw.output_dir) params.output_dir = raw.output_dir;
-            if (raw.author) params.author = raw.author;
+            if (raw.author && !params.author) params.author = raw.author;
           } else {
             params = raw as unknown as CreateWordParams;
           }
@@ -1765,10 +1868,32 @@ function createMcpServer() {
           let params: CreatePresentationParams;
           if (!raw.slides || raw.slides.length === 0) {
             const desc = raw.description || raw.title || raw.filename || 'presentation';
-            params = generatePresentationFromDescription(desc, raw.filename);
+            const fname = raw.filename || slugify(desc) || 'presentation';
+            const aiJson = await callOllamaForContent(desc, 'ppt');
+            if (aiJson) {
+              try {
+                const aiData = JSON.parse(aiJson) as Partial<CreatePresentationParams>;
+                if (Array.isArray(aiData.slides) && aiData.slides.length > 0) {
+                  params = {
+                    filename: fname,
+                    title: aiData.title,
+                    subtitle: aiData.subtitle ?? raw.subtitle,
+                    slides: aiData.slides,
+                    author: raw.author,
+                    theme_color: raw.theme_color,
+                  };
+                } else {
+                  params = generatePresentationFromDescription(desc, raw.filename);
+                }
+              } catch {
+                params = generatePresentationFromDescription(desc, raw.filename);
+              }
+            } else {
+              params = generatePresentationFromDescription(desc, raw.filename);
+            }
             if (raw.output_dir) params.output_dir = raw.output_dir;
-            if (raw.author) params.author = raw.author;
-            if (raw.theme_color) params.theme_color = raw.theme_color;
+            if (raw.author && !params.author) params.author = raw.author;
+            if (raw.theme_color && !params.theme_color) params.theme_color = raw.theme_color;
           } else {
             params = raw as unknown as CreatePresentationParams;
           }
