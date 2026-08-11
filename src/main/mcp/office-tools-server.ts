@@ -667,237 +667,42 @@ function generatePresentationFromDescription(
   description: string,
   filename?: string
 ): CreatePresentationParams {
-  const d = description.toLowerCase();
   const fname = filename || slugify(description) || 'presentation';
-  const isPitch = /pitch|startup|investor|funding/.test(d);
-  const isReport = /report|quarterly|annual|review/.test(d);
-  const isTraining = /training|course|tutorial|workshop/.test(d);
-
   const title = description.replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 60);
+  const terms = uniqueNonEmpty(
+    description
+      .replace(/[^a-zA-Z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((term) => term.length > 3)
+  ).slice(0, 8);
 
-  if (isPitch) {
-    return {
-      filename: fname,
-      title,
-      subtitle: 'Investor Pitch Deck',
-      slides: [
-        {
-          layout: 'content',
-          title: 'The Problem',
-          bullets: [
-            'Current market gap or pain point',
-            'Who is affected and how significantly',
-            'Why existing solutions fall short',
-          ],
-        },
-        {
-          layout: 'content',
-          title: 'Our Solution',
-          bullets: [
-            'Clear description of the product or service',
-            'How it solves the problem',
-            'Key differentiators from competitors',
-          ],
-        },
-        {
-          layout: 'two_column',
-          title: 'Market Opportunity',
-          left_bullets: [
-            'Total Addressable Market: $X billion',
-            'Serviceable Market: $Y million',
-            '5-year CAGR: Z%',
-          ],
-          right_bullets: ['Target customer segment', 'Geographic focus', 'Entry strategy'],
-        },
-        {
-          layout: 'content',
-          title: 'Business Model',
-          bullets: [
-            'Revenue streams (subscription / transaction / licensing)',
-            'Pricing strategy',
-            'Unit economics and margins',
-          ],
-          notes: 'Explain how the business makes money.',
-        },
-        {
-          layout: 'table',
-          title: 'Traction & Milestones',
-          table: {
-            headers: ['Milestone', 'Status', 'Date'],
-            rows: [
-              ['MVP Launched', 'Completed', 'Q1 2025'],
-              ['First 100 Customers', 'Completed', 'Q2 2025'],
-              ['Series A Raise', 'In Progress', 'Q3 2025'],
-              ['Break-even', 'Planned', 'Q4 2025'],
-            ],
-          },
-        },
-        {
-          layout: 'content',
-          title: 'The Ask',
-          bullets: [
-            'Funding amount: $X million',
-            'Use of funds: 50% product, 30% sales, 20% operations',
-            'Expected runway: 18–24 months',
-          ],
-          notes: 'Be specific about what you need and why.',
-        },
-      ],
-    };
-  }
-
-  if (isReport) {
-    return {
-      filename: fname,
-      title,
-      subtitle: 'Quarterly Business Review',
-      slides: [
-        {
-          layout: 'content',
-          title: 'Quarter at a Glance',
-          bullets: [
-            'Revenue: $X (↑12% vs prior quarter)',
-            'Operating profit: $Y (↑8%)',
-            'Customer base: Z (↑15% new customers)',
-            'Key highlight: [Major achievement]',
-          ],
-        },
-        {
-          layout: 'table',
-          title: 'KPI Scorecard',
-          table: {
-            headers: ['KPI', 'Target', 'Actual', 'Status'],
-            rows: [
-              ['Revenue', '$500K', '$562K', '✅ Exceeded'],
-              ['Gross Margin', '60%', '63%', '✅ Exceeded'],
-              ['Customer Churn', '<5%', '3.2%', '✅ Exceeded'],
-              ['NPS Score', '>70', '74', '✅ Exceeded'],
-            ],
-          },
-        },
-        {
-          layout: 'content',
-          title: 'Wins & Highlights',
-          bullets: [
-            '[Key win 1 — specific achievement]',
-            '[Key win 2 — specific achievement]',
-            '[Key win 3 — specific achievement]',
-            'Team grew by X members',
-          ],
-          notes: 'Celebrate the wins before discussing challenges.',
-        },
-        {
-          layout: 'content',
-          title: 'Challenges & Learnings',
-          bullets: [
-            '[Challenge 1] — Mitigation: [action taken]',
-            '[Challenge 2] — Mitigation: [action taken]',
-            '[Learning] — Applied in [area]',
-          ],
-        },
-        {
-          layout: 'content',
-          title: 'Next Quarter Priorities',
-          bullets: [
-            'Priority 1: [Goal and measurable outcome]',
-            'Priority 2: [Goal and measurable outcome]',
-            'Priority 3: [Goal and measurable outcome]',
-            'Resource requirements: [Summary]',
-          ],
-        },
-      ],
-    };
-  }
-
-  if (isTraining) {
-    return {
-      filename: fname,
-      title,
-      subtitle: 'Training Programme',
-      slides: [
-        {
-          layout: 'content',
-          title: 'Learning Objectives',
-          bullets: [
-            'By the end of this session, you will be able to:',
-            'Objective 1: [Skill or knowledge outcome]',
-            'Objective 2: [Skill or knowledge outcome]',
-            'Objective 3: [Skill or knowledge outcome]',
-          ],
-        },
-        {
-          layout: 'content',
-          title: 'Module 1: Foundations',
-          bullets: ['Key concept 1', 'Key concept 2', 'Key concept 3'],
-          notes: 'Spend 15 minutes on this section.',
-        },
-        {
-          layout: 'content',
-          title: 'Module 2: Core Skills',
-          bullets: [
-            'Skill 1 — theory and practice',
-            'Skill 2 — worked examples',
-            'Skill 3 — hands-on exercise',
-          ],
-        },
-        {
-          layout: 'content',
-          title: 'Module 3: Advanced Topics',
-          bullets: ['Advanced concept 1', 'Advanced concept 2', 'Case study / real-world example'],
-        },
-        {
-          layout: 'content',
-          title: 'Summary & Next Steps',
-          bullets: [
-            'Recap of key learnings',
-            'Resources for further reading',
-            'Assessment or quiz',
-            'Contact details for support',
-          ],
-        },
-      ],
-    };
-  }
-
-  // Default general presentation
   return {
     filename: fname,
     title,
-    subtitle: 'Presentation',
+    subtitle: 'Draft generated from the user request',
     slides: [
       {
         layout: 'content',
-        title: 'Overview',
+        title: 'Request Summary',
         bullets: [
-          'Background and context',
-          'Purpose of this presentation',
-          'Key topics covered today',
+          `User request: ${truncateText(description, 180)}`,
+          'No source-backed facts were available to the fallback generator.',
+          'Content below is a neutral outline and should be expanded with provided source material.',
         ],
       },
       {
         layout: 'content',
-        title: 'Section 1',
-        bullets: ['Main point 1', 'Supporting detail', 'Example or evidence'],
+        title: 'Detected Topics',
+        bullets: terms.length > 0 ? terms : ['No specific source topics detected in the request.'],
       },
       {
         layout: 'content',
-        title: 'Section 2',
-        bullets: ['Main point 2', 'Supporting detail', 'Example or evidence'],
-      },
-      {
-        layout: 'two_column',
-        title: 'Comparison',
-        left_bullets: ['Option A benefits', 'Cost: Lower', 'Timeline: Faster'],
-        right_bullets: ['Option B benefits', 'Cost: Higher', 'Quality: Better'],
-      },
-      {
-        layout: 'content',
-        title: 'Conclusions & Next Steps',
+        title: 'Suggested Structure',
         bullets: [
-          'Key takeaway 1',
-          'Key takeaway 2',
-          'Recommended next action',
-          'Timeline and ownership',
+          'Context and objective',
+          'Source-backed findings or sections',
+          'Risks, gaps, or decisions',
+          'Recommended next actions',
         ],
       },
     ],
@@ -939,9 +744,7 @@ async function createWordDocument(params: CreateWordParams): Promise<string> {
     TableRow,
     TableCell,
     WidthType,
-    BorderStyle,
     AlignmentType,
-    UnderlineType,
   } = await import('docx');
 
   const children: InstanceType<typeof Paragraph | typeof Table>[] = [];
@@ -1134,6 +937,853 @@ interface CreatePresentationParams {
   author?: string;
   theme_color?: string; // hex e.g. '1F4E79'
   slides: PptSlide[];
+}
+
+type WorkbookCellValue =
+  | string
+  | number
+  | boolean
+  | Date
+  | null
+  | undefined
+  | Record<string, unknown>;
+
+interface WorkbookRowLike {
+  values: WorkbookCellValue[];
+}
+
+interface WorkbookWorksheetLike {
+  name: string;
+  eachRow: (
+    options: { includeEmpty: boolean },
+    callback: (row: WorkbookRowLike, rowNumber: number) => void
+  ) => void;
+}
+
+interface WorkbookLike {
+  worksheets: WorkbookWorksheetLike[];
+}
+
+interface RoadmapPack {
+  sequence: number;
+  packId: string;
+  deliveryPack: string;
+  department: string;
+  wave: string;
+  useCases: number;
+  fteMonths: number;
+  personDays: number;
+  startM: string;
+  endM: string;
+  buildStarts: string;
+  liveFrom: string;
+  sourceReference: string;
+}
+
+interface UseCaseRecord {
+  id: string;
+  rowType: string;
+  packId: string;
+  deliveryPack: string;
+  priority: string;
+  planStatus: string;
+  planYear: string;
+  department: string;
+  subArea: string;
+  useCase: string;
+  whatItDoes: string;
+  action: string;
+  aiCapability: string;
+  primaryDataSources: string;
+  dataReadiness: string;
+  effort: string;
+  wave: string;
+  liveFrom: string;
+  startM: string;
+  endM: string;
+  personDays: number;
+  sourceReference: string;
+}
+
+function formatNumber(value: number, decimals = 0): string {
+  return value.toLocaleString('en-US', {
+    maximumFractionDigits: decimals,
+    minimumFractionDigits: decimals,
+  });
+}
+
+function formatDays(value: number): string {
+  return `${formatNumber(Math.round(value))} days`;
+}
+
+function cleanCellText(value: WorkbookCellValue): string {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === 'object') {
+    if ('result' in value) return cleanCellText(value.result as WorkbookCellValue);
+    if ('text' in value) return cleanCellText(value.text as WorkbookCellValue);
+    if ('richText' in value && Array.isArray(value.richText)) {
+      return value.richText
+        .map((part) =>
+          typeof part === 'object' && part && 'text' in part ? String(part.text ?? '') : ''
+        )
+        .join('')
+        .trim();
+    }
+  }
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
+function truncateText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
+}
+
+function uniqueNonEmpty(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const cleaned = value.trim();
+    if (!cleaned || seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    result.push(cleaned);
+  }
+  return result;
+}
+
+function toNumber(value: string): number {
+  const parsed = Number(String(value).replace(/[,%]/g, ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function worksheetRows(sheet: WorkbookWorksheetLike | undefined): string[][] {
+  if (!sheet) return [];
+  const rows: string[][] = [];
+  sheet.eachRow({ includeEmpty: false }, (row) => {
+    const values = Array.isArray(row.values) ? Array.from(row.values.slice(1), cleanCellText) : [];
+    if (values.some((value) => value.length > 0)) rows.push(values);
+  });
+  return rows;
+}
+
+function findSheet(workbook: WorkbookLike, namePart: string): WorkbookWorksheetLike | undefined {
+  const needle = namePart.toLowerCase();
+  return workbook.worksheets.find((sheet) => sheet.name.toLowerCase().includes(needle));
+}
+
+function findHeaderRow(rows: string[][], requiredColumns: string[]): number {
+  const required = requiredColumns.map((column) => column.toLowerCase());
+  return rows.findIndex((row) => {
+    const normalized = Array.from(row, (cell) => String(cell || '').toLowerCase());
+    return required.every((column) =>
+      normalized.some((cell) => cell === column || cell.includes(column))
+    );
+  });
+}
+
+function getColumn(headers: string[], candidates: string[]): number {
+  const normalized = Array.from(headers, (header) => String(header || '').toLowerCase());
+  for (const candidate of candidates) {
+    const needle = candidate.toLowerCase();
+    const exact = normalized.findIndex((header) => header === needle);
+    if (exact >= 0) return exact;
+    const partial = normalized.findIndex((header) => header.includes(needle));
+    if (partial >= 0) return partial;
+  }
+  return -1;
+}
+
+function valueAt(row: string[], index: number): string {
+  return index >= 0 ? row[index] || '' : '';
+}
+
+function parseRoadmapPacks(rows: string[][]): RoadmapPack[] {
+  const headerIndex = findHeaderRow(rows, ['Pack ID', 'Delivery pack']);
+  if (headerIndex < 0) return [];
+  const headers = rows[headerIndex];
+  const idx = {
+    sequence: getColumn(headers, ['#']),
+    packId: getColumn(headers, ['Pack ID']),
+    deliveryPack: getColumn(headers, ['Delivery pack']),
+    department: getColumn(headers, ['Department']),
+    wave: getColumn(headers, ['Wave / Action']),
+    useCases: getColumn(headers, ['Use cases planned']),
+    fteMonths: getColumn(headers, ['Effort (FTE-mo)']),
+    personDays: getColumn(headers, ['Effort (person-days)']),
+    startM: getColumn(headers, ['Start M']),
+    endM: getColumn(headers, ['End M']),
+    buildStarts: getColumn(headers, ['Build starts']),
+    liveFrom: getColumn(headers, ['Live from']),
+  };
+
+  return rows
+    .slice(headerIndex + 1)
+    .filter((row) => toNumber(valueAt(row, idx.sequence)) > 0)
+    .map((row) => {
+      const sequence = toNumber(valueAt(row, idx.sequence));
+      const packId = valueAt(row, idx.packId);
+      return {
+        sequence,
+        packId,
+        deliveryPack: valueAt(row, idx.deliveryPack),
+        department: valueAt(row, idx.department),
+        wave: valueAt(row, idx.wave),
+        useCases: toNumber(valueAt(row, idx.useCases)),
+        fteMonths: toNumber(valueAt(row, idx.fteMonths)),
+        personDays: toNumber(valueAt(row, idx.personDays)),
+        startM: valueAt(row, idx.startM),
+        endM: valueAt(row, idx.endM),
+        buildStarts: valueAt(row, idx.buildStarts),
+        liveFrom: valueAt(row, idx.liveFrom),
+        sourceReference: `Roadmap and Gantt | Pack ${packId || sequence}`,
+      };
+    })
+    .filter((pack) => pack.packId && pack.deliveryPack);
+}
+
+function parseUseCases(rows: string[][]): UseCaseRecord[] {
+  const headerIndex = findHeaderRow(rows, ['Planned Y/N', 'Use case']);
+  if (headerIndex < 0) return [];
+  const headers = rows[headerIndex];
+  const idx = {
+    planned: getColumn(headers, ['Planned Y/N']),
+    id: getColumn(headers, ['UC ID']),
+    packId: getColumn(headers, ['Pack ID']),
+    deliveryPack: getColumn(headers, ['Delivery pack']),
+    priority: getColumn(headers, ['Priority']),
+    planStatus: getColumn(headers, ['Plan status']),
+    planYear: getColumn(headers, ['Plan year']),
+    department: getColumn(headers, ['Department']),
+    subArea: getColumn(headers, ['Sub-area']),
+    rowType: getColumn(headers, ['Row type']),
+    useCase: getColumn(headers, ['Use case']),
+    whatItDoes: getColumn(headers, ['What it does']),
+    action: getColumn(headers, ['Action']),
+    aiCapability: getColumn(headers, ['AI capability']),
+    primaryDataSources: getColumn(headers, ['Primary data sources']),
+    dataReadiness: getColumn(headers, ['Data readiness']),
+    effort: getColumn(headers, ['Effort']),
+    wave: getColumn(headers, ['Wave']),
+    startM: getColumn(headers, ['Start M']),
+    endM: getColumn(headers, ['End M']),
+    liveFrom: getColumn(headers, ['Live from']),
+    personDays: getColumn(headers, ['Effort (person-days)']),
+  };
+
+  return rows
+    .slice(headerIndex + 1)
+    .filter((row) => valueAt(row, idx.planned).toUpperCase() === 'Y')
+    .map((row, offset) => {
+      const id = valueAt(row, idx.id);
+      return {
+        id,
+        rowType: valueAt(row, idx.rowType),
+        packId: valueAt(row, idx.packId),
+        deliveryPack: valueAt(row, idx.deliveryPack),
+        priority: valueAt(row, idx.priority),
+        planStatus: valueAt(row, idx.planStatus),
+        planYear: valueAt(row, idx.planYear),
+        department: valueAt(row, idx.department),
+        subArea: valueAt(row, idx.subArea),
+        useCase: valueAt(row, idx.useCase),
+        whatItDoes: valueAt(row, idx.whatItDoes),
+        action: valueAt(row, idx.action),
+        aiCapability: valueAt(row, idx.aiCapability),
+        primaryDataSources: valueAt(row, idx.primaryDataSources),
+        dataReadiness: valueAt(row, idx.dataReadiness),
+        effort: valueAt(row, idx.effort),
+        wave: valueAt(row, idx.wave),
+        startM: valueAt(row, idx.startM),
+        endM: valueAt(row, idx.endM),
+        liveFrom: valueAt(row, idx.liveFrom),
+        personDays: toNumber(valueAt(row, idx.personDays)),
+        sourceReference: `Use Case Master | ${id || `row ${headerIndex + offset + 2}`}`,
+      };
+    })
+    .filter((record) => record.id && (record.useCase || record.deliveryPack)) as UseCaseRecord[];
+}
+
+function parseBusinessCase(rows: string[][]): {
+  title: string;
+  subtitle: string;
+  metrics: string[];
+  narrative: Array<{ label: string; text: string }>;
+} {
+  const titleRow = rows.find((row) => row.some((cell) => cell.toUpperCase().includes('ROADMAP')));
+  const title = titleRow
+    ? uniqueNonEmpty(titleRow).join(' ').replace(/\s+/g, ' ').trim()
+    : 'Data & AI Roadmap';
+  const metrics =
+    rows
+      .find((row) => row.some((cell) => /use cases|person-days|live|parked/i.test(cell)))
+      ?.filter((cell) => !cell.toUpperCase().includes('ROADMAP'))
+      .filter(Boolean)
+      .filter((cell, index, values) => values.indexOf(cell) === index)
+      .map((cell) => truncateText(cell, 92)) || [];
+  const narrative = rows
+    .filter((row) => row.length >= 3 && row[1] && row[2] && row[2].length > 30)
+    .map((row) => ({ label: row[1], text: row[2] }))
+    .filter((item) => item.label !== item.text)
+    .filter((item) => !item.label.toUpperCase().includes('ROADMAP'))
+    .filter((item) => !/^[A-Z]\s*·/.test(item.label))
+    .slice(0, 12);
+
+  return {
+    title: title.replace(/\s*\|\s*/g, ' ').slice(0, 90),
+    subtitle: 'Roadmap plan generated from workbook source data',
+    metrics,
+    narrative,
+  };
+}
+
+function waveSummaryTable(packs: RoadmapPack[]): PptTableDef {
+  const waves = new Map<
+    string,
+    { packs: number; useCases: number; fteMonths: number; personDays: number }
+  >();
+  for (const pack of packs) {
+    const key = pack.wave || 'Unassigned';
+    const current = waves.get(key) || { packs: 0, useCases: 0, fteMonths: 0, personDays: 0 };
+    current.packs += 1;
+    current.useCases += pack.useCases;
+    current.fteMonths += pack.fteMonths;
+    current.personDays += pack.personDays;
+    waves.set(key, current);
+  }
+
+  return {
+    headers: ['Wave', 'Packs', 'Use cases', 'FTE-mo', 'Person-days'],
+    rows: Array.from(waves.entries()).map(([wave, values]) => [
+      truncateText(wave, 42),
+      String(values.packs),
+      formatNumber(values.useCases),
+      formatNumber(values.fteMonths, 1),
+      formatDays(values.personDays),
+    ]),
+  };
+}
+
+function currentWipTable(rows: string[][]): PptTableDef | null {
+  if (rows.length < 2) return null;
+  const headers = rows[0];
+  const idx = {
+    desc: getColumn(headers, ['Desc']),
+    who: getColumn(headers, ['Who']),
+    date: getColumn(headers, ['Date Opened']),
+    exp: getColumn(headers, ['Exp Date']),
+  };
+  const body = rows
+    .slice(1)
+    .filter((row) => valueAt(row, idx.desc))
+    .slice(0, 7)
+    .map((row) => [
+      truncateText(valueAt(row, idx.desc), 42),
+      truncateText(valueAt(row, idx.who), 22),
+      valueAt(row, idx.date).slice(0, 10),
+      valueAt(row, idx.exp).slice(0, 10),
+    ]);
+  if (body.length === 0) return null;
+  return { headers: ['Work item', 'Owner', 'Opened', 'Target'], rows: body };
+}
+
+function findGenericHeaderRow(rows: string[][]): number {
+  const scanRows = rows.slice(0, Math.min(rows.length, 25));
+  let bestIndex = -1;
+  let bestScore = 0;
+
+  scanRows.forEach((row, index) => {
+    const nonEmpty = row.filter(Boolean).length;
+    const nextNonEmpty = rows[index + 1]?.filter(Boolean).length || 0;
+    const score = nonEmpty + Math.min(nextNonEmpty, nonEmpty);
+    if (nonEmpty >= 2 && score > bestScore) {
+      bestIndex = index;
+      bestScore = score;
+    }
+  });
+
+  return bestIndex >= 0 ? bestIndex : 0;
+}
+
+function genericWorkbookPresentation(
+  workbook: WorkbookLike,
+  sourceFile: string,
+  filename: string
+): CreatePresentationParams | null {
+  const sheetProfiles = workbook.worksheets
+    .map((sheet) => {
+      const rows = worksheetRows(sheet).slice(0, 250);
+      if (rows.length === 0) return null;
+
+      const headerIndex = findGenericHeaderRow(rows);
+      const rawHeaders = rows[headerIndex] || [];
+      const headers = rawHeaders
+        .map((header, index) => header || `Column ${index + 1}`)
+        .filter(Boolean);
+      const dataRows = rows
+        .slice(headerIndex + 1)
+        .filter((row) => row.some(Boolean))
+        .map((row) => row.map((cell) => truncateText(cell, 90)));
+
+      return {
+        name: sheet.name,
+        rows,
+        headers,
+        dataRows,
+        dataRowCount: dataRows.length,
+        columnCount: Math.max(...rows.map((row) => row.length), headers.length),
+      };
+    })
+    .filter((profile): profile is NonNullable<typeof profile> => Boolean(profile));
+
+  if (sheetProfiles.length === 0) return null;
+
+  const slides: PptSlide[] = [
+    {
+      layout: 'content',
+      title: 'Workbook Overview',
+      bullets: [
+        `Source file: ${path.basename(sourceFile)}`,
+        `${sheetProfiles.length} worksheet(s) parsed from the attached workbook.`,
+        ...sheetProfiles
+          .slice(0, 6)
+          .map(
+            (sheet) =>
+              `${sheet.name}: ${formatNumber(sheet.dataRowCount)} data row(s), ${formatNumber(sheet.columnCount)} column(s).`
+          ),
+      ],
+    },
+    {
+      layout: 'table',
+      title: 'Sheet Inventory',
+      table: {
+        headers: ['Sheet', 'Rows', 'Columns', 'Key fields'],
+        rows: sheetProfiles.map((sheet) => [
+          truncateText(sheet.name, 30),
+          formatNumber(sheet.dataRowCount),
+          formatNumber(sheet.columnCount),
+          truncateText(sheet.headers.slice(0, 6).join(', '), 70),
+        ]),
+      },
+    },
+  ];
+
+  for (const sheet of sheetProfiles.slice(0, 5)) {
+    const headers = sheet.headers.slice(0, 5);
+    const rows = sheet.dataRows
+      .slice(0, 8)
+      .map((row) => headers.map((_, index) => row[index] || ''));
+    if (headers.length === 0 || rows.length === 0) continue;
+
+    slides.push({
+      layout: 'table',
+      title: truncateText(sheet.name, 50),
+      table: {
+        headers,
+        rows,
+      },
+    });
+  }
+
+  return {
+    filename,
+    title: path.basename(sourceFile, path.extname(sourceFile)),
+    subtitle: 'Presentation generated from attached workbook sheets',
+    slides,
+  };
+}
+
+async function generateExcelWbsFromWorkbookSource(
+  sourceFile: string,
+  filename: string
+): Promise<CreateExcelParams | null> {
+  const ext = path.extname(sourceFile).toLowerCase();
+  if (ext !== '.xlsx' && ext !== '.xlsm' && ext !== '.xls') return null;
+
+  const ExcelJS = await import('exceljs');
+  const workbook = new ExcelJS.default.Workbook();
+  await workbook.xlsx.readFile(sourceFile);
+  const workbookLike = workbook as unknown as WorkbookLike;
+
+  const businessRows = worksheetRows(findSheet(workbookLike, 'plan and business'));
+  const roadmapRows = worksheetRows(findSheet(workbookLike, 'roadmap'));
+  const useCaseRows = worksheetRows(findSheet(workbookLike, 'use case'));
+  const wipRows = worksheetRows(findSheet(workbookLike, 'current wip'));
+
+  const business = parseBusinessCase(businessRows);
+  const packs = parseRoadmapPacks(roadmapRows);
+  const useCases = parseUseCases(useCaseRows);
+  const wip = currentWipTable(wipRows);
+
+  if (packs.length === 0 && useCases.length === 0) return null;
+
+  const useCasesByPack = new Map<string, UseCaseRecord[]>();
+  for (const useCase of useCases) {
+    const items = useCasesByPack.get(useCase.packId) || [];
+    items.push(useCase);
+    useCasesByPack.set(useCase.packId, items);
+  }
+
+  const packsById = new Map(packs.map((pack) => [pack.packId, pack]));
+  const packIds = uniqueNonEmpty([
+    ...packs.map((pack) => pack.packId),
+    ...useCases.map((useCase) => useCase.packId),
+  ]);
+  const totalDays = packs.reduce((sum, pack) => sum + pack.personDays, 0);
+  const totalFteMonths = packs.reduce((sum, pack) => sum + pack.fteMonths, 0);
+  const wbsRows: (string | number)[][] = [];
+  let workstreamNo = 0;
+
+  for (const packId of packIds) {
+    const pack = packsById.get(packId);
+    const packUseCases = useCasesByPack.get(packId) || [];
+    const firstUseCase = packUseCases[0];
+    workstreamNo += 1;
+    const packWbsId = `${workstreamNo}.0`;
+    const packTask = pack?.deliveryPack || firstUseCase?.deliveryPack || packId;
+    const packDepartment = pack?.department || firstUseCase?.department || '';
+    const packWave = pack?.wave || firstUseCase?.wave || '';
+    const packStart = pack?.startM || firstUseCase?.startM || '';
+    const packFinish =
+      pack?.liveFrom || pack?.endM || firstUseCase?.liveFrom || firstUseCase?.endM || '';
+    const packDays =
+      pack?.personDays || packUseCases.reduce((sum, useCase) => sum + useCase.personDays, 0);
+
+    wbsRows.push([
+      packWbsId,
+      2,
+      '',
+      'Delivery pack',
+      packId,
+      packTask,
+      packDepartment,
+      '',
+      packWave,
+      packStart,
+      packFinish,
+      pack?.fteMonths ? Number(pack.fteMonths.toFixed(2)) : '',
+      Math.round(packDays),
+      '',
+      '',
+      '',
+      '',
+      pack?.sourceReference || firstUseCase?.sourceReference || '',
+    ]);
+
+    packUseCases.forEach((useCase, index) => {
+      wbsRows.push([
+        `${workstreamNo}.${index + 1}`,
+        3,
+        packWbsId,
+        useCase.rowType || 'Source row',
+        useCase.packId,
+        useCase.useCase,
+        useCase.department,
+        useCase.subArea,
+        useCase.wave || pack?.wave || '',
+        useCase.startM || '',
+        useCase.liveFrom || useCase.endM || '',
+        useCase.effort,
+        Math.round(useCase.personDays),
+        truncateText(useCase.aiCapability, 80),
+        truncateText(useCase.action || useCase.whatItDoes, 160),
+        truncateText(useCase.primaryDataSources, 140),
+        truncateText(useCase.dataReadiness || useCase.planStatus || useCase.planYear, 140),
+        useCase.sourceReference,
+      ]);
+    });
+  }
+
+  const waveRows = waveSummaryTable(packs).rows.map((row) => [
+    row[0],
+    Number(row[1]) || 0,
+    Number(row[2]) || 0,
+    Number(row[3]) || 0,
+    row[4],
+  ]);
+
+  const wipRowsForExcel = wip?.rows.map((row) => [row[0], row[1], row[2], row[3]]) || [];
+
+  const roadmapPackRows = packs.map((pack) => [
+    pack.sequence,
+    pack.packId,
+    pack.deliveryPack,
+    pack.department,
+    pack.wave,
+    pack.useCases,
+    Number(pack.fteMonths.toFixed(2)),
+    Math.round(pack.personDays),
+    pack.startM,
+    pack.endM,
+    pack.buildStarts,
+    pack.liveFrom,
+    pack.sourceReference,
+  ]);
+
+  const plannedSourceRows = useCases.map((useCase) => [
+    useCase.id,
+    useCase.rowType,
+    useCase.packId,
+    useCase.deliveryPack,
+    useCase.priority,
+    useCase.planStatus,
+    useCase.planYear,
+    useCase.department,
+    useCase.subArea,
+    useCase.useCase,
+    truncateText(useCase.whatItDoes, 180),
+    useCase.action,
+    useCase.aiCapability,
+    useCase.primaryDataSources,
+    useCase.dataReadiness,
+    useCase.effort,
+    Math.round(useCase.personDays),
+    useCase.wave,
+    useCase.startM,
+    useCase.endM,
+    useCase.liveFrom,
+    useCase.sourceReference,
+  ]);
+
+  return {
+    filename,
+    sheets: [
+      {
+        name: 'WBS Summary',
+        headers: ['Metric', 'Value'],
+        rows: [
+          ['Source workbook', path.basename(sourceFile)],
+          ['Roadmap title', business.title],
+          ['Delivery packs', packs.length],
+          ['Planned source rows parsed', useCases.length],
+          ['WBS parent task rows', packIds.length],
+          ['WBS source subtask rows', useCases.length],
+          ['Pack-row effort subtotal', Math.round(totalDays)],
+          ['Pack-row FTE months subtotal', Number(totalFteMonths.toFixed(1))],
+          ['Roadmap source summary', business.metrics.join(' | ')],
+        ],
+        column_widths: [34, 110],
+      },
+      {
+        name: 'Detailed WBS',
+        headers: [
+          'WBS ID',
+          'Level',
+          'Parent WBS',
+          'Source Row Type',
+          'Pack ID',
+          'Task / Subtask',
+          'Department',
+          'Sub-area',
+          'Wave',
+          'Start',
+          'Finish / Live',
+          'Effort',
+          'Effort Days',
+          'AI Capability',
+          'Source Action / What It Does',
+          'Primary Data Sources',
+          'Data Readiness / Status',
+          'Source Reference',
+        ],
+        rows: wbsRows,
+        column_widths: [10, 8, 12, 18, 12, 52, 26, 34, 32, 12, 16, 12, 14, 28, 58, 42, 42, 34],
+        freeze_header: true,
+      },
+      {
+        name: 'Roadmap Packs',
+        headers: [
+          'Sequence',
+          'Pack ID',
+          'Delivery pack',
+          'Department',
+          'Wave',
+          'Use cases planned',
+          'Effort FTE-mo',
+          'Effort person-days',
+          'Start M',
+          'End M',
+          'Build starts',
+          'Live from',
+          'Source Reference',
+        ],
+        rows: roadmapPackRows,
+        column_widths: [10, 12, 58, 26, 34, 18, 16, 18, 12, 12, 16, 16, 34],
+      },
+      {
+        name: 'Planned Source Rows',
+        headers: [
+          'UC ID',
+          'Row type',
+          'Pack ID',
+          'Delivery pack',
+          'Priority',
+          'Plan status',
+          'Plan year',
+          'Department',
+          'Sub-area',
+          'Use case',
+          'What it does',
+          'Action',
+          'AI capability',
+          'Primary data sources',
+          'Data readiness',
+          'Effort',
+          'Effort person-days',
+          'Wave',
+          'Start M',
+          'End M',
+          'Live from',
+          'Source Reference',
+        ],
+        rows: plannedSourceRows,
+        column_widths: [
+          14, 18, 12, 48, 12, 18, 24, 24, 36, 48, 64, 18, 28, 36, 34, 12, 18, 32, 12, 12, 16, 34,
+        ],
+      },
+      {
+        name: 'Wave Summary',
+        headers: ['Wave', 'Packs', 'Use cases', 'FTE months', 'Person-days'],
+        rows: waveRows,
+        column_widths: [44, 12, 14, 14, 18],
+      },
+      {
+        name: 'Current WIP',
+        headers: ['Work Item', 'Owner', 'Opened', 'Target'],
+        rows: wipRowsForExcel,
+        column_widths: [52, 24, 16, 16],
+      },
+    ],
+  };
+}
+
+async function generatePresentationFromWorkbookSource(
+  sourceFile: string,
+  filename: string
+): Promise<CreatePresentationParams | null> {
+  const ext = path.extname(sourceFile).toLowerCase();
+  if (ext !== '.xlsx' && ext !== '.xlsm' && ext !== '.xls') return null;
+
+  const ExcelJS = await import('exceljs');
+  const workbook = new ExcelJS.default.Workbook();
+  await workbook.xlsx.readFile(sourceFile);
+  const workbookLike = workbook as unknown as WorkbookLike;
+
+  const businessRows = worksheetRows(findSheet(workbookLike, 'plan and business'));
+  const roadmapRows = worksheetRows(findSheet(workbookLike, 'roadmap'));
+  const useCaseRows = worksheetRows(findSheet(workbookLike, 'use case'));
+  const wipRows = worksheetRows(findSheet(workbookLike, 'current wip'));
+
+  const business = parseBusinessCase(businessRows);
+  const packs = parseRoadmapPacks(roadmapRows);
+  const useCases = parseUseCases(useCaseRows);
+  const wip = currentWipTable(wipRows);
+  const totalDays = packs.reduce((sum, pack) => sum + pack.personDays, 0);
+  const totalFteMonths = packs.reduce((sum, pack) => sum + pack.fteMonths, 0);
+
+  if (packs.length === 0 && useCases.length === 0) {
+    return genericWorkbookPresentation(workbookLike, sourceFile, filename);
+  }
+
+  const sourceNarrativeBullets = business.narrative
+    .map((item) => `${item.label}: ${truncateText(item.text, 185)}`)
+    .slice(0, 7);
+  const dataReadinessRows = Array.from(
+    useCases.reduce((summary, useCase) => {
+      const key = useCase.dataReadiness || useCase.planStatus || 'Unspecified';
+      summary.set(key, (summary.get(key) || 0) + 1);
+      return summary;
+    }, new Map<string, number>())
+  )
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([status, count]) => [truncateText(status, 56), String(count)]);
+
+  const slides: PptSlide[] = [
+    {
+      layout: 'content',
+      title: 'Executive Summary',
+      bullets: [
+        ...business.metrics.slice(0, 4),
+        `${formatNumber(packs.length)} roadmap packs and ${formatNumber(useCases.length)} planned source rows parsed from ${path.basename(sourceFile)}.`,
+        `${formatDays(totalDays)} and ${formatNumber(totalFteMonths, 1)} FTE-months in the roadmap pack rows.`,
+      ].filter(Boolean),
+    },
+    {
+      layout: 'table',
+      title: 'Roadmap by Wave',
+      table: waveSummaryTable(packs),
+    },
+  ];
+
+  if (sourceNarrativeBullets.length > 0) {
+    slides.push({
+      layout: 'content',
+      title: 'Source Narrative',
+      bullets: sourceNarrativeBullets,
+    });
+  }
+
+  if (packs.length > 0) {
+    slides.push({
+      layout: 'table',
+      title: 'Roadmap Packs',
+      table: {
+        headers: ['Pack', 'Delivery pack', 'Wave', 'Person-days'],
+        rows: packs
+          .slice(0, 9)
+          .map((pack) => [
+            pack.packId,
+            truncateText(pack.deliveryPack, 42),
+            truncateText(pack.wave, 26),
+            formatDays(pack.personDays),
+          ]),
+      },
+    });
+  }
+
+  if (useCases.length > 0) {
+    slides.push({
+      layout: 'table',
+      title: 'Planned Source Rows',
+      table: {
+        headers: ['ID', 'Type', 'Task / Subtask', 'Live from'],
+        rows: useCases
+          .slice(0, 8)
+          .map((useCase) => [
+            useCase.id,
+            truncateText(useCase.rowType, 18),
+            truncateText(useCase.useCase, 42),
+            useCase.liveFrom || '-',
+          ]),
+      },
+    });
+  }
+
+  if (dataReadinessRows.length > 0) {
+    slides.push({
+      layout: 'table',
+      title: 'Data Readiness Summary',
+      table: {
+        headers: ['Source status', 'Rows'],
+        rows: dataReadinessRows,
+      },
+    });
+  }
+
+  if (wip) {
+    slides.push({
+      layout: 'table',
+      title: 'Current WIP and Open Decisions',
+      table: wip,
+    });
+  }
+
+  return {
+    filename,
+    title: business.title || path.basename(sourceFile, path.extname(sourceFile)),
+    subtitle: business.subtitle,
+    slides,
+  };
 }
 
 async function createPresentation(params: CreatePresentationParams): Promise<string> {
@@ -1368,12 +2018,17 @@ async function createPresentation(params: CreatePresentationParams): Promise<str
           const tableData = [
             headers.map((h) => ({
               text: h,
-              options: { bold: true, color: 'FFFFFF', fill: THEME, align: 'center' as const },
+              options: {
+                bold: true,
+                color: 'FFFFFF',
+                fill: { color: THEME },
+                align: 'center' as const,
+              },
             })),
             ...rows.map((row, ri) =>
               row.map((cell) => ({
                 text: cell,
-                options: { fill: ri % 2 === 0 ? THEME_LIGHT : 'FFFFFF', fontSize: 14 },
+                options: { fill: { color: ri % 2 === 0 ? THEME_LIGHT : 'FFFFFF' }, fontSize: 14 },
               }))
             ),
           ];
@@ -1580,6 +2235,11 @@ function createMcpServer() {
                 type: 'string',
                 description: 'Directory to save the file. Defaults to Desktop.',
               },
+              source_file: {
+                type: 'string',
+                description:
+                  'Optional local source file path. For WBS/project-plan requests from .xlsx roadmap workbooks, the tool reads the workbook directly and creates a detailed WBS.',
+              },
               sheets: {
                 type: 'array',
                 description: 'One or more worksheet definitions',
@@ -1724,6 +2384,11 @@ function createMcpServer() {
                 type: 'string',
                 description: 'Directory to save the file. Defaults to Desktop.',
               },
+              source_file: {
+                type: 'string',
+                description:
+                  'Optional local source file path. When provided for .xlsx roadmap/workbook inputs, the tool reads the workbook directly and creates slides from actual source data.',
+              },
               title: {
                 type: 'string',
                 description: 'Presentation title (shown on auto-generated cover slide)',
@@ -1827,26 +2492,37 @@ function createMcpServer() {
 
     try {
       switch (name) {
-        case 'create_canva_design': {
-          const outPath = await createCanvaDesign(args as unknown as CreateCanvaParams);
-          return {
-            content: [{ type: 'text', text: `✅ Canva design created: ${outPath}` }],
-          };
-        }
-
         case 'create_excel': {
           const raw = args as {
             description?: string;
             filename?: string;
             sheets?: ExcelSheetDef[];
             output_dir?: string;
+            source_file?: string;
           };
           let params: CreateExcelParams;
           if (!raw.sheets || raw.sheets.length === 0) {
             const desc = raw.description || raw.filename || 'spreadsheet';
             const fname = raw.filename || slugify(desc) || 'spreadsheet';
-            const aiJson = await callOllamaForContent(desc, 'excel');
-            if (aiJson) {
+            const shouldBuildWbs =
+              /\b(wbs|work breakdown|project plan|tasks? and sub[- ]?tasks?|task breakdown|implementation plan)\b/i.test(
+                desc
+              );
+            const workbookParams =
+              shouldBuildWbs && raw.source_file
+                ? await generateExcelWbsFromWorkbookSource(raw.source_file, fname).catch(
+                    (error) => {
+                      process.stderr.write(
+                        `[office-tools-server] WBS source generation failed: ${error instanceof Error ? error.stack || error.message : String(error)}\n`
+                      );
+                      return null;
+                    }
+                  )
+                : null;
+            const aiJson = workbookParams ? null : await callOllamaForContent(desc, 'excel');
+            if (workbookParams) {
+              params = workbookParams;
+            } else if (aiJson) {
               try {
                 const aiData = JSON.parse(aiJson) as Partial<CreateExcelParams>;
                 if (Array.isArray(aiData.sheets) && aiData.sheets.length > 0) {
@@ -1920,6 +2596,7 @@ function createMcpServer() {
             filename?: string;
             slides?: PptSlide[];
             output_dir?: string;
+            source_file?: string;
             title?: string;
             subtitle?: string;
             author?: string;
@@ -1929,8 +2606,15 @@ function createMcpServer() {
           if (!raw.slides || raw.slides.length === 0) {
             const desc = raw.description || raw.title || raw.filename || 'presentation';
             const fname = raw.filename || slugify(desc) || 'presentation';
-            const aiJson = await callOllamaForContent(desc, 'ppt');
-            if (aiJson) {
+            const workbookParams = raw.source_file
+              ? await generatePresentationFromWorkbookSource(raw.source_file, fname).catch(
+                  () => null
+                )
+              : null;
+            const aiJson = workbookParams ? null : await callOllamaForContent(desc, 'ppt');
+            if (workbookParams) {
+              params = workbookParams;
+            } else if (aiJson) {
               try {
                 const aiData = JSON.parse(aiJson) as Partial<CreatePresentationParams>;
                 if (Array.isArray(aiData.slides) && aiData.slides.length > 0) {
@@ -1982,7 +2666,7 @@ function createMcpServer() {
 }
 
 serveStdio(() => createMcpServer(), {
-  onError: (error) => {
+  onerror: (error: Error) => {
     process.stderr.write(`[office-tools-server] Fatal: ${error}\n`);
   },
 });

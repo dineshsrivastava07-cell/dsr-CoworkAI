@@ -589,6 +589,13 @@ export class CoworkAgentRunner {
     if (/\b(powerpoint|pptx?|presentation|slides|slide deck|deck)\b/.test(lower)) {
       return 'mcp__Office_Tools__create_presentation';
     }
+    if (
+      /\b(wbs|work breakdown structure|work-breakdown structure|project plan|tasks? and sub[- ]?tasks?|task breakdown|implementation plan)\b/.test(
+        lower
+      )
+    ) {
+      return 'mcp__Office_Tools__create_excel';
+    }
     if (/\b(word doc(ument)?|docx?|\.docx|write.*doc|create.*doc|generate.*doc)\b/.test(lower)) {
       return 'mcp__Office_Tools__create_word_document';
     }
@@ -605,10 +612,29 @@ export class CoworkAgentRunner {
     return null;
   }
 
-  /** Extract a referenced filename (e.g. "VMart_Data.xlsx") from the user prompt */
-  private extractReferencedFilename(prompt: string): string | null {
-    const m = prompt.match(/['"]?([^\s'"\\]+\.(xlsx?|docx?|csv|txt|pptx?))['"]?/i);
-    return m ? m[1] : null;
+  /** Extract referenced file paths from the user prompt and attachment metadata. */
+  private extractReferencedFilePaths(prompt: string, cwd?: string): string[] {
+    const refs: string[] = [];
+    const attachmentPathMatches = prompt.matchAll(/\bat path:\s*([^\n\r]+)/gi);
+
+    for (const match of attachmentPathMatches) {
+      const rawPath = match[1]?.trim();
+      if (!rawPath) continue;
+      refs.push(path.isAbsolute(rawPath) ? rawPath : path.resolve(cwd || process.cwd(), rawPath));
+    }
+
+    const filenameMatch = prompt.match(/['"]?([^\s'"\\]+\.(xlsx?|docx?|csv|txt|pptx?))['"]?/i);
+    if (filenameMatch?.[1]) {
+      const referenced = filenameMatch[1];
+      refs.push(
+        path.isAbsolute(referenced) ? referenced : path.resolve(cwd || process.cwd(), referenced)
+      );
+
+      const filePath = this.findFileOnDisk(referenced);
+      if (filePath) refs.push(filePath);
+    }
+
+    return Array.from(new Set(refs));
   }
 
   /** Search Desktop / Downloads / Documents / home for a given filename */
@@ -663,13 +689,33 @@ export class CoworkAgentRunner {
     return null;
   }
 
+  private isExplicitBrowserIntent(prompt: string): boolean {
+    const lower = prompt.toLowerCase();
+    return /\b(open|use|browse|navigate|visit|go to|search|google|web|website|url|http|https|browser|chrome|amazon|nasdaq|flight|stock price|current price|latest news)\b/.test(
+      lower
+    );
+  }
+
+  private isLocalArtifactIntent(prompt: string): boolean {
+    const lower = prompt.toLowerCase();
+    const hasLocalFileSignal =
+      /\b(pfa|attached|attachment|based on the attached|source file|local file|\.xlsx?|\.docx?|\.csv|\.txt)\b/.test(
+        lower
+      );
+    const hasArtifactSignal =
+      /\b(create|make|generate|build|produce|write|prepare|draft|wbs|work breakdown|project plan|tasks?|subtasks?|pptx?|presentation|slides|document|docx?|excel|spreadsheet|workbook)\b/.test(
+        lower
+      );
+    return hasLocalFileSignal && hasArtifactSignal;
+  }
+
   /**
    * Pre-interceptor: if the user's prompt is clearly an office document creation request,
    * call the MCP tool directly — bypassing the LLM which tends to describe rather than act.
    * Returns true if the request was handled (caller should skip piSession.prompt).
    */
   private async tryDirectOfficeToolCall(
-    sessionId: string,
+    session: Session,
     prompt: string,
     thinkingStepId: string
   ): Promise<boolean> {
@@ -681,7 +727,7 @@ export class CoworkAgentRunner {
     const lower = prompt.toLowerCase();
     const isCreation =
       /\b(create|make|generate|build|produce|write|prepare|draft)\b/.test(lower) ||
-      /\b(sample|template|format|invoice|report|spreadsheet|tracker|budget|proposal|agenda|deck)\b/.test(
+      /\b(sample|template|format|invoice|report|spreadsheet|tracker|budget|proposal|agenda|deck|wbs|work breakdown|project plan|tasks?|subtasks?)\b/.test(
         lower
       );
     if (!isCreation) return false;
@@ -691,7 +737,16 @@ export class CoworkAgentRunner {
     );
 
     try {
-      this.sendTraceUpdate(sessionId, thinkingStepId, { title: 'Creating document…' });
+      this.sendTraceUpdate(session.id, thinkingStepId, { title: 'Creating document…' });
+      this.sendTraceStep(session.id, {
+        id: uuidv4(),
+        type: 'tool_call',
+        status: 'completed',
+        title: 'Detected Office artifact request',
+        toolName,
+        toolInput: { request: prompt.slice(0, 300) },
+        timestamp: Date.now(),
+      });
 
       // Auto-derive a filename from the prompt
       const slug = prompt
@@ -704,38 +759,87 @@ export class CoworkAgentRunner {
 
       // If the prompt references a local file, read it and inject its content
       let description = prompt;
-      const referencedFilename = this.extractReferencedFilename(prompt);
-      if (referencedFilename) {
-        const filePath = this.findFileOnDisk(referencedFilename);
-        if (filePath) {
-          const fileContent = this.readAttachedFileContent(filePath);
-          if (fileContent) {
-            description =
-              `User request: ${prompt}\n\n` +
-              `=== CONTENT FROM ATTACHED FILE: ${referencedFilename} ===\n${fileContent}`;
-          }
+      let sourceFile: string | undefined;
+      const referencedFilePaths = this.extractReferencedFilePaths(prompt, session.cwd);
+      if (referencedFilePaths.length > 0) {
+        this.sendTraceStep(session.id, {
+          id: uuidv4(),
+          type: 'tool_call',
+          status: 'running',
+          title: 'Resolving attached source file',
+          toolName: 'source_file',
+          toolInput: { candidates: referencedFilePaths },
+          timestamp: Date.now(),
+        });
+      }
+      for (const filePath of referencedFilePaths) {
+        if (!fs.existsSync(filePath)) continue;
+        sourceFile = filePath;
+        this.sendTraceStep(session.id, {
+          id: uuidv4(),
+          type: 'tool_result',
+          status: 'completed',
+          title: 'Source file resolved',
+          toolName: 'source_file',
+          toolOutput: path.basename(filePath),
+          timestamp: Date.now(),
+        });
+        const fileContent = this.readAttachedFileContent(filePath);
+        if (fileContent) {
+          this.sendTraceStep(session.id, {
+            id: uuidv4(),
+            type: 'tool_result',
+            status: 'completed',
+            title: 'Source workbook/text extracted',
+            toolName: 'source_file',
+            toolOutput: `${path.basename(filePath)} (${fileContent.length.toLocaleString()} chars sampled)`,
+            timestamp: Date.now(),
+          });
+          description =
+            `User request: ${prompt}\n\n` +
+            `=== CONTENT FROM ATTACHED FILE: ${path.basename(filePath)} ===\n${fileContent}`;
+          break;
         }
       }
 
+      const officeStepId = uuidv4();
+      this.sendTraceStep(session.id, {
+        id: officeStepId,
+        type: 'tool_call',
+        status: 'running',
+        title: sourceFile ? 'Generating artifact from source file' : 'Generating Office artifact',
+        toolName,
+        toolInput: {
+          filename: slug || 'document',
+          ...(sourceFile ? { source_file: sourceFile } : {}),
+        },
+        timestamp: Date.now(),
+      });
       const result = await this.mcpManager.callTool(toolName, {
         description,
         filename: slug || 'document',
+        ...(sourceFile ? { source_file: sourceFile } : {}),
       });
 
       const text = Array.isArray((result as { content?: { text?: string }[] }).content)
         ? ((result as { content: { text?: string }[] }).content[0]?.text ?? String(result))
         : String(result);
 
-      this.sendTraceUpdate(sessionId, thinkingStepId, {
+      this.sendTraceUpdate(session.id, officeStepId, {
+        status: 'completed',
+        title: 'Office artifact generated',
+        toolOutput: text.slice(0, 400),
+      });
+      this.sendTraceUpdate(session.id, thinkingStepId, {
         status: 'completed',
         title: 'Document created',
         toolName,
         toolOutput: text.slice(0, 400),
       });
 
-      this.sendMessage(sessionId, {
+      this.sendMessage(session.id, {
         id: uuidv4(),
-        sessionId,
+        sessionId: session.id,
         role: 'assistant',
         content: [{ type: 'text', text }],
         timestamp: Date.now(),
@@ -1754,6 +1858,16 @@ ${hints.join('\n')}
         log('[CoworkAgentRunner] User message contains images');
       }
 
+      // Enterprise guardrail: local attachment artifact requests must be handled
+      // deterministically by Office/File tools before model routing, memory expansion,
+      // or browser tools can influence the run.
+      const earlyOfficeHandled = await this.tryDirectOfficeToolCall(
+        session,
+        prompt,
+        thinkingStepId
+      );
+      if (earlyOfficeHandled) return;
+
       logTiming('before pi-ai model resolution', runStartTime);
 
       // Resolve model via pi-ai
@@ -2182,7 +2296,8 @@ ${hints.join('\n')}
                 const hasPlaceholders = resolvedArgs.some(
                   (arg) =>
                     arg.includes('{SOFTWARE_DEV_SERVER_PATH}') ||
-                    arg.includes('{GUI_OPERATE_SERVER_PATH}')
+                    arg.includes('{GUI_OPERATE_SERVER_PATH}') ||
+                    arg.includes('{OFFICE_TOOLS_SERVER_PATH}')
                 );
 
                 if (hasPlaceholders) {
@@ -2195,6 +2310,8 @@ ${hints.join('\n')}
                     presetKey = 'software-development';
                   } else if (config.name === 'GUI_Operate' || config.name === 'GUI Operate') {
                     presetKey = 'gui-operate';
+                  } else if (config.name === 'Office_Tools' || config.name === 'Office Tools') {
+                    presetKey = 'office-tools';
                   }
 
                   if (presetKey) {
@@ -2283,7 +2400,7 @@ This is an isolated sandbox environment. Use ${VIRTUAL_WORKSPACE_PATH} as the ro
         'You are dsr-CoworkAI, an AI assistant by DSR AI Lab. Be concise, accurate, and tool-capable. Always deliver direct output — never suggest scripts or workarounds when a tool can produce the result immediately.',
         `CRITICAL BEHAVIORAL RULES:
 1. DIRECT OUTPUT ALWAYS: When the user asks you to create a file, document, spreadsheet, presentation, image, or any artifact — produce it immediately using the appropriate MCP tool. Do NOT suggest Python scripts, shell commands, or workarounds. Do NOT ask "Would you like me to...". Just call the tool and deliver the file.
-2. CHAT FIRST for non-actionable requests: For questions, summaries, explanations, and general conversation — reply directly in chat text.
+2. CHAT FIRST for non-actionable requests: Do NOT create, write, or edit files unless the user explicitly asks. For questions, summaries, explanations, and general conversation — reply directly in chat text.
 3. When a request is actionable, proceed immediately with reasonable assumptions. If you need clarification, ask briefly in plain text.
 4. For relative time windows like "within two days" in browsing or research tasks, assume the most recent two relevant publication days unless the user explicitly defines another date range.
 5. For bracketed placeholders like [Agent], [Topic], etc., treat the word inside brackets as the literal search keyword unless the user says otherwise.
@@ -2291,7 +2408,7 @@ This is an isolated sandbox environment. Use ${VIRTUAL_WORKSPACE_PATH} as the ro
         configSummaryPrompt,
         workspaceInfoPrompt,
         `<citation_requirements>
-If your answer uses linkable content from MCP tools, include a "Sources:" section and otherwise use standard Markdown links.
+If your answer uses linkable content from MCP tools, include a "Sources:" section and otherwise use standard Markdown links: [Title](https://example.com)
 </citation_requirements>`,
         `<tool_behavior>
 OFFICE DOCUMENT CREATION — HIGHEST PRIORITY RULE:
@@ -2322,7 +2439,17 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
       // Create or reuse agent session
       // Bridge MCP tools as customTools for the agent SDK.
       // Re-read every query so newly added/removed MCP servers take effect immediately.
-      const mcpCustomTools = this.mcpManager ? buildMcpCustomTools(this.mcpManager) : [];
+      const shouldExposeBrowserTools =
+        this.isExplicitBrowserIntent(prompt) && !this.isLocalArtifactIntent(prompt);
+      const mcpCustomTools = this.mcpManager
+        ? buildMcpCustomTools(this.mcpManager).filter((tool) => {
+            if (shouldExposeBrowserTools) return true;
+            return !tool.name.toLowerCase().startsWith('mcp__chrome__');
+          })
+        : [];
+      if (!shouldExposeBrowserTools) {
+        log('[CoworkAgentRunner] Browser tools withheld for non-browser/local-artifact request');
+      }
       const extensionCustomTools = extensionResult.customTools || [];
       const customTools = [...mcpCustomTools, ...extensionCustomTools];
       if (mcpCustomTools.length > 0) {
@@ -3104,15 +3231,6 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
             })
           );
         }
-        // Office document pre-interceptor: call tool directly when intent is clear,
-        // bypassing the LLM which tends to describe the document instead of creating it.
-        const officeHandled = await this.tryDirectOfficeToolCall(
-          session.id,
-          prompt,
-          thinkingStepId
-        );
-        if (officeHandled) return;
-
         const promptResult = await piSession.prompt(contextualPrompt);
         log(
           '[CoworkAgentRunner] prompt() returned:',
