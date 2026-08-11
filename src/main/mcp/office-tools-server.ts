@@ -1426,60 +1426,120 @@ async function createPresentation(params: CreatePresentationParams): Promise<str
  * Returns the raw JSON string, or null if the call fails / returns non-JSON.
  * The caller must parse and validate before use; template generators are the fallback.
  */
+/** Clean up raw tab-separated file content for Ollama — remove empty columns, collapse whitespace */
+function cleanFileContent(raw: string): string {
+  return raw
+    .split('\n')
+    .map((line) => {
+      // Split on tabs, drop empty trailing cells, rejoin with " | "
+      const cells = line.split('\t').map((c) => c.trim());
+      const nonEmpty = cells.filter((c) => c && c !== 'None' && c !== 'undefined');
+      return nonEmpty.join(' | ');
+    })
+    .filter((line) => line.length > 0)
+    .join('\n')
+    .slice(0, 6000); // cap at 6000 chars for Ollama context
+}
+
 async function callOllamaForContent(
   description: string,
   docType: 'excel' | 'word' | 'ppt'
 ): Promise<string | null> {
-  const systemPrompts: Record<string, string> = {
-    excel: `You are a data analyst. Generate Excel spreadsheet data as JSON.
-Return ONLY valid JSON, no markdown fences, no explanation.
-Schema: {"sheets":[{"name":"SheetName","headers":["Col1","Col2","Col3"],"rows":[["val","val",0]],"freeze_header":true,"add_totals":false}]}
-Rules:
-- Include specific realistic data (real names, numbers, dates — NOT placeholders like "Item 1")
-- At least 8–15 data rows per main sheet
-- Add a Summary/Totals sheet when appropriate (invoices, budgets, sales)
-- Row values must align with headers in order`,
+  // Detect file-content injection from tryDirectOfficeToolCall
+  const FILE_SEP = '=== CONTENT FROM ATTACHED FILE';
+  const hasFile = description.includes(FILE_SEP);
 
-    word: `You are a professional writer. Generate Word document content as JSON.
-Return ONLY valid JSON, no markdown fences, no explanation.
-Schema: {"title":"Title","blocks":[{"type":"paragraph","heading":"Section","heading_level":1,"text":"Actual content here"},{"type":"bullet_list","items":["Point 1","Point 2"]},{"type":"table","table":{"headers":["Col"],"rows":[["Val"]]}}]}
-Block types: paragraph | bullet_list | numbered_list | table | page_break
-heading_level: 1, 2, or 3
-Write real professional content — no placeholder or bracket text.
-Include at least 5 sections with substantive information.`,
+  let model: string;
+  let messages: Array<{ role: string; content: string }>;
 
-    ppt: `You are a presentation designer. Generate PowerPoint slide content as JSON.
-Return ONLY valid JSON, no markdown fences, no explanation.
-Schema: {"title":"Presentation Title","subtitle":"Subtitle","slides":[{"layout":"content","title":"Slide Title","bullets":["Specific point 1","Specific point 2"]},{"layout":"table","title":"Data","table":{"headers":["Col A","Col B"],"rows":[["val","val"]]}},{"layout":"two_column","title":"Compare","left_bullets":["Left 1"],"right_bullets":["Right 1"]}]}
-Layout options: content (title+bullets) | table (title+table) | two_column (title+left_bullets+right_bullets) | blank
-Write specific informative bullets — not generic placeholders.
-Include 5–7 slides. Cover slide is auto-generated; start with content slides.`,
-  };
+  if (hasFile) {
+    // Split into user request and raw file content
+    const sepIdx = description.indexOf(FILE_SEP);
+    const userRequest = description
+      .slice(0, sepIdx)
+      .replace(/^User request:\s*/i, '')
+      .trim();
+    const rawFileBlock = description.slice(sepIdx);
+    const fileContent = cleanFileContent(rawFileBlock);
+
+    // Use the more capable 26b model for file-based generation
+    model = 'gemma4:26b';
+
+    const fileSchemas: Record<string, string> = {
+      excel: `{"sheets":[{"name":"SheetName","headers":["Col1","Col2"],"rows":[["actual value","actual value"]],"freeze_header":true}]}`,
+      word: `{"title":"Actual document title","blocks":[{"type":"paragraph","heading":"Section","heading_level":1,"text":"Actual content from file"},{"type":"bullet_list","items":["Actual fact from file"]}]}`,
+      ppt: `{"title":"Actual title from file","subtitle":"Actual subtitle","slides":[{"layout":"content","title":"Actual slide title","bullets":["Actual fact: specific number or detail from file"]},{"layout":"table","title":"Data Table","table":{"headers":["Col A","Col B"],"rows":[["actual","actual"]]}}]}`,
+    };
+
+    const fileInstructions: Record<string, string> = {
+      excel: `Extract data from the file content below and organize it into Excel sheets.
+Every row must contain ACTUAL values from the file — no placeholders, no invented data.`,
+      word: `Extract key information from the file content below and write a professional document.
+Every section must contain ACTUAL content from the file — no [brackets], no invented text.`,
+      ppt: `Extract key facts from the file content below and create presentation slides.
+STRICT RULES:
+- Every bullet must state an ACTUAL fact from the file (real numbers, real names, real dates)
+- NEVER write "$X", "[Goal]", "[Achievement]", "Key win", "Challenge 1" or any generic placeholder
+- The title must be the actual project/document name found in the file
+- Include the actual timeline, phases, teams, metrics — whatever is in the file`,
+    };
+
+    messages = [
+      {
+        role: 'system',
+        content: `You convert file data into structured document content. Return ONLY valid JSON — no markdown fences, no explanation, no preamble.
+Schema: ${fileSchemas[docType]}
+${fileInstructions[docType]}`,
+      },
+      {
+        role: 'user',
+        content: `FILE CONTENT:\n${fileContent}\n\nTASK: ${userRequest || `Create a ${docType === 'ppt' ? 'presentation' : docType === 'excel' ? 'spreadsheet' : 'document'} from this file data.`}`,
+      },
+    ];
+  } else {
+    // No file — plain description, use fast e4b model
+    model = process.env.OLLAMA_MODEL || 'gemma4:e4b';
+
+    const plainPrompts: Record<string, string> = {
+      excel: `You are a data analyst. Generate Excel spreadsheet data as JSON.
+Return ONLY valid JSON, no markdown fences.
+Schema: {"sheets":[{"name":"SheetName","headers":["Col1","Col2","Col3"],"rows":[["val","val",0]],"freeze_header":true}]}
+Use specific realistic data — at least 8–15 rows. Row values must align with headers.`,
+      word: `You are a professional writer. Generate Word document content as JSON.
+Return ONLY valid JSON, no markdown fences.
+Schema: {"title":"Title","blocks":[{"type":"paragraph","heading":"Section","heading_level":1,"text":"Content"},{"type":"bullet_list","items":["Point 1"]}]}
+Write real professional content — no placeholder text. Include at least 5 sections.`,
+      ppt: `You are a presentation designer. Generate PowerPoint content as JSON.
+Return ONLY valid JSON, no markdown fences.
+Schema: {"title":"Title","subtitle":"Subtitle","slides":[{"layout":"content","title":"Slide","bullets":["Specific point"]},{"layout":"table","title":"Data","table":{"headers":["A","B"],"rows":[["val","val"]]}}]}
+Layouts: content|table|two_column|blank. Write specific bullets — no generic placeholders. 5–7 slides.`,
+    };
+
+    messages = [
+      { role: 'system', content: plainPrompts[docType] },
+      { role: 'user', content: `Create: ${description}` },
+    ];
+  }
 
   try {
     const resp = await fetch('http://localhost:11434/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: process.env.OLLAMA_MODEL || 'gemma4:e4b',
-        messages: [
-          { role: 'system', content: systemPrompts[docType] },
-          { role: 'user', content: `Create: ${description}` },
-        ],
+        model,
+        messages,
         stream: false,
-        options: { temperature: 0.35, num_predict: 3000 },
+        options: { temperature: 0.2, num_predict: 4000 },
       }),
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(120000), // 2 min for 26b
     });
     if (!resp.ok) return null;
     const data = (await resp.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
     const content = data.choices?.[0]?.message?.content ?? '';
-    // Strip markdown fences and extract the first JSON object
-    const stripped = content.replace(/```(?:json)?[\s\S]*?```/g, (m: string) =>
-      m.replace(/```(?:json)?|```/g, '')
-    );
+    // Strip markdown fences and extract the outermost JSON object
+    const stripped = content.replace(/```(?:json)?|```/g, '').trim();
     const match = stripped.match(/\{[\s\S]*\}/);
     return match ? match[0] : null;
   } catch {
