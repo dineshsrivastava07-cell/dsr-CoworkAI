@@ -59,7 +59,7 @@ const EN_STOP_WORDS = new Set([
   'based',
 ]);
 
-const ZH_STOP_WORDS = ['我们', '你们', '他们', '进行', '一个', '这个', '那个', '需要', '可以', '已经'];
+const ZH_STOP_WORDS: string[] = [];
 const CORE_CATEGORIES = new Set<CoreMemoryCategory>([
   'identity',
   'preferences',

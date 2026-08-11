@@ -580,6 +580,94 @@ export class CoworkAgentRunner {
   private _skillsSetupDone = false;
 
   /**
+   * Detect whether the user prompt is requesting an office document (Excel/Word/PPT).
+   * Returns the matching tool name or null.
+   */
+  private detectOfficeDocIntent(prompt: string): string | null {
+    const lower = prompt.toLowerCase();
+    if (/\b(excel|xlsx|spreadsheet|workbook|xls)\b/.test(lower)) {
+      return 'mcp__Office_Tools__create_excel';
+    }
+    if (/\b(powerpoint|pptx?|presentation|slides|slide deck|deck)\b/.test(lower)) {
+      return 'mcp__Office_Tools__create_presentation';
+    }
+    if (/\b(word doc(ument)?|docx?|\.docx|write.*doc|create.*doc|generate.*doc)\b/.test(lower)) {
+      return 'mcp__Office_Tools__create_word_document';
+    }
+    return null;
+  }
+
+  /**
+   * Pre-interceptor: if the user's prompt is clearly an office document creation request,
+   * call the MCP tool directly — bypassing the LLM which tends to describe rather than act.
+   * Returns true if the request was handled (caller should skip piSession.prompt).
+   */
+  private async tryDirectOfficeToolCall(
+    sessionId: string,
+    prompt: string,
+    thinkingStepId: string
+  ): Promise<boolean> {
+    if (!this.mcpManager) return false;
+    const toolName = this.detectOfficeDocIntent(prompt);
+    if (!toolName) return false;
+
+    // Only intercept when the prompt is primarily a creation request (not research/analysis)
+    const lower = prompt.toLowerCase();
+    const isCreation =
+      /\b(create|make|generate|build|produce|write|prepare|draft)\b/.test(lower) ||
+      /\b(sample|template|format|invoice|report|spreadsheet|tracker|budget|proposal|agenda|deck)\b/.test(
+        lower
+      );
+    if (!isCreation) return false;
+
+    log(
+      `[CoworkAgentRunner] Office doc intercept: ${toolName} for prompt: "${prompt.slice(0, 80)}"`
+    );
+
+    try {
+      this.sendTraceUpdate(sessionId, thinkingStepId, { title: 'Creating document…' });
+
+      // Auto-derive a filename from the prompt
+      const slug = prompt
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .trim()
+        .split(/\s+/)
+        .slice(0, 6)
+        .join('_');
+
+      const result = await this.mcpManager.callTool(toolName, {
+        description: prompt,
+        filename: slug || 'document',
+      });
+
+      const text = Array.isArray((result as { content?: { text?: string }[] }).content)
+        ? ((result as { content: { text?: string }[] }).content[0]?.text ?? String(result))
+        : String(result);
+
+      this.sendTraceUpdate(sessionId, thinkingStepId, {
+        status: 'completed',
+        title: 'Document created',
+        toolName,
+        toolOutput: text.slice(0, 400),
+      });
+
+      this.sendMessage(sessionId, {
+        id: uuidv4(),
+        sessionId,
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+        timestamp: Date.now(),
+      });
+
+      return true;
+    } catch (err) {
+      logWarn('[CoworkAgentRunner] Office doc intercept failed, falling back to LLM:', err);
+      return false;
+    }
+  }
+
+  /**
    * Clear SDK session cache for a session
    * Called when session's cwd changes - SDK sessions are bound to cwd
    */
@@ -2125,10 +2213,23 @@ This is an isolated sandbox environment. Use ${VIRTUAL_WORKSPACE_PATH} as the ro
 If your answer uses linkable content from MCP tools, include a "Sources:" section and otherwise use standard Markdown links.
 </citation_requirements>`,
         `<tool_behavior>
-Tool routing:
-- OFFICE DOCUMENTS: When the user asks to create an Excel spreadsheet (.xlsx), Word document (.docx), or PowerPoint presentation (.pptx) — immediately call the corresponding Office Tools MCP tool: mcp__Office_Tools__create_excel, mcp__Office_Tools__create_word_document, or mcp__Office_Tools__create_presentation. Pass the user's content requirements as tool arguments. Return the saved file path. Never suggest openpyxl, python-docx, or any Python library instead.
-- CHROME/BROWSER: If user asks to use Chrome/browser/web navigation, prioritize Chrome MCP tools (mcp__Chrome__*) over generic WebSearch/WebFetch.
-- WEB SEARCH: Use WebSearch/WebFetch only when Chrome MCP is unavailable or the user explicitly asks for generic web search.
+OFFICE DOCUMENT CREATION — HIGHEST PRIORITY RULE:
+When the user asks to create any Excel/spreadsheet/xlsx, Word/document/docx, or PowerPoint/presentation/pptx:
+  1. Call the Office Tools MCP tool IMMEDIATELY. Do NOT think about it, describe it, or ask for confirmation.
+  2. Use the SIMPLEST call: {"description": "<paste the user's exact request here>", "filename": "<descriptive name>"}
+  3. The tool auto-generates all content from the description — you do NOT need to provide sheets, blocks, or slides.
+  4. Tool names: mcp__Office_Tools__create_excel | mcp__Office_Tools__create_word_document | mcp__Office_Tools__create_presentation
+  5. NEVER suggest Python scripts, openpyxl, python-docx, pptx library, or manual steps. NEVER describe structure. Just call the tool.
+
+FILE ATTACHMENT + DOCUMENT CREATION:
+When the user attaches or references a local file (e.g. "PFA", "based on the attached file", "see attached", ".xlsx attached"):
+  1. Do NOT open Chrome or search the web. The file is LOCAL.
+  2. Read the file using the bash tool: cat/head the file path if it's text, or use python3 to read xlsx/docx.
+  3. Extract the relevant content and pass it as the "description" to the appropriate Office Tools MCP tool.
+  4. Create the output document immediately.
+
+CHROME/BROWSER: Only use Chrome MCP tools (mcp__Chrome__*) when user explicitly asks to browse a URL or use the browser.
+WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the web. File tasks and document creation tasks are LOCAL — never web-triggered.
 </tool_behavior>`,
         this.getBundledPathHints(),
       ]
@@ -2922,6 +3023,15 @@ Tool routing:
             })
           );
         }
+        // Office document pre-interceptor: call tool directly when intent is clear,
+        // bypassing the LLM which tends to describe the document instead of creating it.
+        const officeHandled = await this.tryDirectOfficeToolCall(
+          session.id,
+          prompt,
+          thinkingStepId
+        );
+        if (officeHandled) return;
+
         const promptResult = await piSession.prompt(contextualPrompt);
         log(
           '[CoworkAgentRunner] prompt() returned:',

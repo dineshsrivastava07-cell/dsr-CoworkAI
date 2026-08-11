@@ -38,15 +38,15 @@ Return JSON only:
       "op": "upsert",
       "category": "identity|interests|skills|preferences",
       "key": "short_chinese_key",
-      "value": "抽象、稳定、可跨任务复用的描述",
-      "reason": "为什么这是 durable core memory"
+      "value": "abstract, stable, reusable description",
+      "reason": "why this is durable core memory"
     },
     {
       "op": "delete",
       "category": "identity|interests|skills|preferences",
       "key": "short_chinese_key",
       "value": null,
-      "reason": "为什么应该删除"
+      "reason": "why this should be deleted"
     }
   ]
 }

@@ -22,17 +22,19 @@ Built on top of the Electron + React stack, dsr-CoworkAI gives you:
 
 ## Features
 
-| Feature | Details |
-|---------|---------|
-| **Local LLM** | Ollama + Gemma 4 (27b / e4b) — runs 100% on your machine |
-| **Gemini OAuth** | Sign in with Google/Gemini — no raw API key needed |
-| **MCP Tools** | 1-click install of Model Context Protocol servers |
-| **Skills** | Reusable agent skill protocols stored locally |
-| **Sandbox** | Lima (macOS) / WSL (Windows) process isolation |
-| **Memory** | Long-term and short-term persistent memory |
-| **Remote** | Control sessions remotely via Slack |
-| **Multi-session** | Parallel agent sessions with context tracking |
-| **Themes** | Dark / Light / System |
+| Feature           | Details                                                                          |
+| ----------------- | -------------------------------------------------------------------------------- |
+| **Local LLM**     | Ollama + Gemma 4 (27b / e4b) — runs 100% on your machine                         |
+| **Gemini OAuth**  | Sign in with Google/Gemini — no raw API key needed                               |
+| **MCP Tools**     | 1-click install of Model Context Protocol servers                                |
+| **Skills**        | Reusable agent skill protocols stored locally                                    |
+| **Sandbox**       | Lima (macOS) / WSL (Windows) process isolation                                   |
+| **Memory**        | Long-term and short-term persistent memory                                       |
+| **Remote**        | Control sessions remotely via Slack                                              |
+| **Multi-session** | Parallel agent sessions with context tracking                                    |
+| **Themes**        | Dark / Light / System                                                            |
+| **Office Tools**  | Create Excel (.xlsx), Word (.docx), and PowerPoint (.pptx) via MCP               |
+| **macOS Signing** | Auto ad-hoc code signing of native addons on install (macOS 26 Tahoe compatible) |
 
 ---
 
@@ -123,9 +125,34 @@ MIT — see [LICENSE](./LICENSE)
 
 ---
 
+## Office Document Generation
+
+dsr-CoworkAI can create fully formatted office documents on demand via the built-in **Office Tools MCP server**:
+
+| Command example                               | Output                                                         |
+| --------------------------------------------- | -------------------------------------------------------------- |
+| "Create a sales report Excel with Q1-Q4 data" | `.xlsx` — styled headers, zebra rows, SUM totals, frozen panes |
+| "Write a project proposal Word document"      | `.docx` — H1-H3 headings, bullet lists, tables                 |
+| "Make a 5-slide pitch deck presentation"      | `.pptx` — cover slide, DSR master theme, speaker notes         |
+
+Files are saved to your Desktop (or `WORKSPACE_DIR` env var) by default.
+
+---
+
+## macOS Compatibility (Tahoe / macOS 26)
+
+macOS 26 (Tahoe) enforces strict code-signing on all native Mach-O addons loaded via `dlopen`. On `npm install`, the `sign-native.sh` postinstall script automatically ad-hoc signs all `.node` native addons (better-sqlite3, clipboard, keytar, etc.) with the required entitlements:
+
+- `cs.allow-jit`
+- `cs.allow-unsigned-executable-memory`
+- `cs.disable-library-validation`
+- `cs.allow-dyld-environment-variables`
+
+No manual signing step is required.
+
+---
+
 ## Developed by
 
 **DSR AI Lab**
 [github.com/dineshsrivastava07-cell](https://github.com/dineshsrivastava07-cell)
-
-> dsr-CoworkAI is a fork of [open-cowork](https://github.com/OpenCoworkAI/open-cowork), rebranded and rebuilt for local-first AI workflows with Ollama + Gemma and Gemini OAuth.

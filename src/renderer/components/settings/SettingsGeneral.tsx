@@ -18,10 +18,7 @@ export function SettingsGeneral() {
     }
   }, []);
 
-  const languages = [
-    { code: 'en', nativeName: 'English' },
-    { code: 'zh', nativeName: '中文' },
-  ];
+  const languages = [{ code: 'en', nativeName: 'English' }];
 
   const themeOptions = [
     { value: 'light' as const, label: t('general.themeLight') },
@@ -74,7 +71,9 @@ export function SettingsGeneral() {
       {/* About */}
       {appVer && (
         <div className="pt-4 border-t border-border">
-          <p className="text-xs text-text-muted">dsr-CoworkAI v{appVer} · Developed by DSR AI Lab</p>
+          <p className="text-xs text-text-muted">
+            dsr-CoworkAI v{appVer} · Developed by DSR AI Lab
+          </p>
         </div>
       )}
     </div>
