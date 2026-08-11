@@ -585,14 +585,80 @@ export class CoworkAgentRunner {
    */
   private detectOfficeDocIntent(prompt: string): string | null {
     const lower = prompt.toLowerCase();
-    if (/\b(excel|xlsx|spreadsheet|workbook|xls)\b/.test(lower)) {
-      return 'mcp__Office_Tools__create_excel';
-    }
+    // PPT and Word checked FIRST — so "create ppt from X.xlsx" routes to PPT, not Excel
     if (/\b(powerpoint|pptx?|presentation|slides|slide deck|deck)\b/.test(lower)) {
       return 'mcp__Office_Tools__create_presentation';
     }
     if (/\b(word doc(ument)?|docx?|\.docx|write.*doc|create.*doc|generate.*doc)\b/.test(lower)) {
       return 'mcp__Office_Tools__create_word_document';
+    }
+    // Excel: explicit output keyword wins
+    if (/\b(excel|spreadsheet|workbook)\b/.test(lower)) {
+      return 'mcp__Office_Tools__create_excel';
+    }
+    // ".xlsx" as output only — not when it follows "based on / from / pfa / attached / see"
+    const xlsxIsInputRef =
+      /\b(based on|from|pfa|attached|see|read|open|using)\b[\s\S]{0,80}\.xlsx?\b/i.test(prompt);
+    if (!xlsxIsInputRef && /\.xlsx?\b/i.test(prompt)) {
+      return 'mcp__Office_Tools__create_excel';
+    }
+    return null;
+  }
+
+  /** Extract a referenced filename (e.g. "VMart_Data.xlsx") from the user prompt */
+  private extractReferencedFilename(prompt: string): string | null {
+    const m = prompt.match(/['"]?([^\s'"\\]+\.(xlsx?|docx?|csv|txt|pptx?))['"]?/i);
+    return m ? m[1] : null;
+  }
+
+  /** Search Desktop / Downloads / Documents / home for a given filename */
+  private findFileOnDisk(filename: string): string | null {
+    const base = path.basename(filename);
+    const dirs = [
+      path.join(os.homedir(), 'Desktop'),
+      path.join(os.homedir(), 'Downloads'),
+      path.join(os.homedir(), 'Documents'),
+      os.homedir(),
+    ];
+    for (const dir of dirs) {
+      const candidate = path.join(dir, base);
+      try {
+        fs.accessSync(candidate);
+        return candidate;
+      } catch {
+        // not in this dir
+      }
+    }
+    return null;
+  }
+
+  /** Read xlsx/csv/txt into plain text for injecting into the MCP tool description */
+  private readAttachedFileContent(filePath: string): string | null {
+    const ext = path.extname(filePath).toLowerCase();
+    try {
+      if (ext === '.csv' || ext === '.txt') {
+        return fs.readFileSync(filePath, 'utf8').slice(0, 8000);
+      }
+      if (ext === '.xlsx' || ext === '.xls') {
+        const script = [
+          'import sys, openpyxl',
+          'wb = openpyxl.load_workbook(sys.argv[1], read_only=True, data_only=True)',
+          'for name in wb.sheetnames:',
+          '    print("Sheet: " + name)',
+          '    n = 0',
+          '    for row in wb[name].iter_rows(values_only=True):',
+          '        vals = [str(v) if v is not None else "" for v in row]',
+          '        if any(v.strip() for v in vals):',
+          '            print("\\t".join(vals))',
+          '            n += 1',
+          '        if n >= 200: break',
+        ].join('\n');
+        return execFileSync('python3', ['-c', script, filePath], { timeout: 15000 })
+          .toString()
+          .slice(0, 8000);
+      }
+    } catch {
+      return null;
     }
     return null;
   }
@@ -636,8 +702,23 @@ export class CoworkAgentRunner {
         .slice(0, 6)
         .join('_');
 
+      // If the prompt references a local file, read it and inject its content
+      let description = prompt;
+      const referencedFilename = this.extractReferencedFilename(prompt);
+      if (referencedFilename) {
+        const filePath = this.findFileOnDisk(referencedFilename);
+        if (filePath) {
+          const fileContent = this.readAttachedFileContent(filePath);
+          if (fileContent) {
+            description =
+              `User request: ${prompt}\n\n` +
+              `=== CONTENT FROM ATTACHED FILE: ${referencedFilename} ===\n${fileContent}`;
+          }
+        }
+      }
+
       const result = await this.mcpManager.callTool(toolName, {
-        description: prompt,
+        description,
         filename: slug || 'document',
       });
 
