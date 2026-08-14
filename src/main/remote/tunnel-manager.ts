@@ -103,7 +103,7 @@ class TunnelManager {
 
       this.currentUrl = url;
       this.isConnected = true;
-      
+
       log('[TunnelManager] Ngrok tunnel established:', url);
       this.emitStatus();
 
@@ -146,11 +146,11 @@ class TunnelManager {
   }
 
   /**
-   * Get webhook URL for Feishu
+   * Get webhook URL for the generic websocket channel
    */
   getWebhookUrl(): string | null {
     if (!this.currentUrl) return null;
-    return `${this.currentUrl}/webhook/feishu`;
+    return `${this.currentUrl}/webhook/websocket`;
   }
 
   /**

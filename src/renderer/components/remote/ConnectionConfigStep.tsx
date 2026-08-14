@@ -1,6 +1,6 @@
 /**
- * ConnectionConfigStep — long-connection vs webhook mode selection,
- * including ngrok tunnel configuration and webhook URL display
+ * ConnectionConfigStep — local gateway vs webhook mode selection,
+ * including ngrok tunnel configuration and webhook URL display.
  */
 
 import { useTranslation } from 'react-i18next';
@@ -56,9 +56,7 @@ export function ConnectionConfigStep({
           <div
             className={`p-2 rounded-lg ${useLongConnection ? 'bg-success/10' : 'bg-surface-active'}`}
           >
-            <Zap
-              className={`w-6 h-6 ${useLongConnection ? 'text-success' : 'text-text-muted'}`}
-            />
+            <Zap className={`w-6 h-6 ${useLongConnection ? 'text-success' : 'text-text-muted'}`} />
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-2">
@@ -70,15 +68,13 @@ export function ConnectionConfigStep({
             <p className="text-sm text-text-secondary mt-1">{t('remote.longConnectionDesc')}</p>
             <div className="flex items-center gap-4 mt-3 text-xs text-text-muted">
               <span className="flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5 text-success" />{' '}
-                {t('remote.noPublicInternet')}
+                <CheckCircle2 className="w-3.5 h-3.5 text-success" /> {t('remote.noPublicInternet')}
               </span>
               <span className="flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5 text-success" /> {t('remote.outOfBox')}
               </span>
               <span className="flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5 text-success" />{' '}
-                {t('remote.stableReliable')}
+                <CheckCircle2 className="w-3.5 h-3.5 text-success" /> {t('remote.stableReliable')}
               </span>
             </div>
           </div>
@@ -129,12 +125,12 @@ export function ConnectionConfigStep({
               </label>
               <div className="flex items-center gap-2">
                 <code className="flex-1 px-3 py-2 bg-surface-hover rounded-lg text-sm font-mono text-text-secondary truncate">
-                  http://127.0.0.1:{gatewayPort}/webhook/feishu
+                  http://127.0.0.1:{gatewayPort}/webhook/websocket
                 </code>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onCopy(`http://127.0.0.1:${gatewayPort}/webhook/feishu`);
+                    onCopy(`http://127.0.0.1:${gatewayPort}/webhook/websocket`);
                   }}
                   className="p-2 rounded-lg hover:bg-surface-active transition-colors"
                 >

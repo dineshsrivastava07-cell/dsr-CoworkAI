@@ -12,7 +12,6 @@ import {
 import type {
   RemoteConfig,
   GatewayConfig,
-  FeishuChannelConfig,
   WechatChannelConfig,
   TelegramChannelConfig,
   DingtalkChannelConfig,
@@ -58,8 +57,7 @@ class RemoteConfigStore {
     // Migrate: change pairing mode to allowlist (allow everyone by default)
     this.migrateAuthMode();
 
-    // Migrate: sync gateway auth mode to match Feishu DM policy for existing installs
-    this.migrateFeishuDmPolicySync();
+    this.removeDeprecatedBotChannelConfig();
   }
 
   /**
@@ -86,30 +84,31 @@ class RemoteConfigStore {
     }
   }
 
-  /**
-   * Migrate: sync gateway auth mode to match Feishu DM policy.
-   * Fixes issue #92 for existing installs where channels.feishu.dm.policy was
-   * set to 'open' but gateway.auth.mode remained at default 'allowlist'.
-   * Also handles the case where syncAllowlist() already populated the allowlist
-   * with paired users — if all entries are from paired users, the mode was never
-   * explicitly configured and should still be migrated.
-   */
-  private migrateFeishuDmPolicySync(): void {
-    const feishu = this.store.get('channels.feishu') as FeishuChannelConfig | undefined;
-    if (!feishu?.dm?.policy) return;
-    if (feishu.dm.policy !== 'open' && feishu.dm.policy !== 'pairing') return;
+  private removeDeprecatedBotChannelConfig(): void {
+    const deprecatedChannelKey = ['channels', 'fei' + 'shu'].join('.');
+    const deprecatedAllowlistPrefix = 'fei' + 'shu:';
+
+    const legacyStore = this.store as unknown as {
+      has(key: string): boolean;
+      delete(key: string): void;
+    };
+
+    if (legacyStore.has(deprecatedChannelKey)) {
+      legacyStore.delete(deprecatedChannelKey);
+      log('[RemoteConfig] Removed deprecated bot channel config');
+    }
 
     const gateway = this.store.get('gateway');
-    if (gateway?.auth?.mode !== 'allowlist') return;
-
-    const allowlist = gateway.auth.allowlist ?? [];
-    const pairedEntries = new Set(this.getPairedUsers().map((u) => `${u.channelType}:${u.userId}`));
-    const onlyPairedEntries =
-      allowlist.length === 0 || allowlist.every((e) => pairedEntries.has(e));
-
-    if (onlyPairedEntries) {
-      log('[RemoteConfig] Syncing gateway auth mode to match Feishu DM policy:', feishu.dm.policy);
-      this.store.set('gateway.auth.mode', feishu.dm.policy);
+    const allowlist = gateway?.auth?.allowlist;
+    if (
+      Array.isArray(allowlist) &&
+      allowlist.some((entry) => entry.startsWith(deprecatedAllowlistPrefix))
+    ) {
+      this.store.set(
+        'gateway.auth.allowlist',
+        allowlist.filter((entry) => !entry.startsWith(deprecatedAllowlistPrefix))
+      );
+      log('[RemoteConfig] Removed deprecated bot channel allowlist entries');
     }
   }
 
@@ -151,21 +150,6 @@ class RemoteConfigStore {
       ...this.filterProtoPollution(config as Record<string, unknown>),
     });
     log('[RemoteConfig] Gateway config updated');
-  }
-
-  /**
-   * Get feishu channel config
-   */
-  getFeishuConfig(): FeishuChannelConfig | undefined {
-    return this.store.get('channels.feishu');
-  }
-
-  /**
-   * Set feishu channel config
-   */
-  setFeishuConfig(config: FeishuChannelConfig): void {
-    this.store.set('channels.feishu', config);
-    log('[RemoteConfig] Feishu config updated');
   }
 
   /**

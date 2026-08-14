@@ -3,19 +3,19 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { MessageSquare, Link2, Settings2, CheckCircle2 } from 'lucide-react';
+import { MonitorCog, Link2, Settings2, CheckCircle2 } from 'lucide-react';
 import type { ConfigStep } from './types';
 
 interface Props {
   activeStep: ConfigStep;
-  isFeishuConfigured: boolean;
+  isIndianVncConfigured: boolean;
   isConnectionConfigured: boolean;
   onStepChange: (step: ConfigStep) => void;
 }
 
 export function ConfigStepNav({
   activeStep,
-  isFeishuConfigured,
+  isIndianVncConfigured,
   isConnectionConfigured,
   onStepChange,
 }: Props) {
@@ -23,10 +23,10 @@ export function ConfigStepNav({
 
   const steps: { id: ConfigStep; labelKey: string; icon: React.ElementType; done: boolean }[] = [
     {
-      id: 'feishu',
-      labelKey: 'remote.stepFeishu',
-      icon: MessageSquare,
-      done: isFeishuConfigured,
+      id: 'indianVnc',
+      labelKey: 'remote.stepIndianVnc',
+      icon: MonitorCog,
+      done: isIndianVncConfigured,
     },
     {
       id: 'connection',

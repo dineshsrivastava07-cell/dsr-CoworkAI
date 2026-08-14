@@ -10,11 +10,12 @@ vi.mock('../src/main/remote/remote-config-store', () => ({
 
 import { RemoteManager } from '../src/main/remote/remote-manager';
 import type { RemoteMessage } from '../src/main/remote/types';
-import type { ServerEvent } from '../src/renderer/types';
+import type { MessageRouter } from '../src/main/remote/message-router';
+import type { ServerEvent, Session } from '../src/renderer/types';
 
 const buildMessage = (): RemoteMessage => ({
   id: 'msg-1',
-  channelType: 'feishu',
+  channelType: 'websocket',
   channelId: 'channel-1',
   sender: { id: 'user-1', isBot: false },
   content: { type: 'text', text: 'list the files' },
@@ -33,18 +34,19 @@ describe('remote user message ui', () => {
     });
 
     manager.setAgentExecutor({
-      startSession: async () => ({ id: 'session-1' } as any),
+      startSession: async () => ({ id: 'session-1' }) as unknown as Session,
       continueSession: async () => {},
       stopSession: async () => {},
     });
 
-    const router = (manager as any).messageRouter;
+    const router = (manager as unknown as { messageRouter: MessageRouter }).messageRouter;
     await router.routeMessage(buildMessage());
 
-    const hasUserStream = events.some((event) =>
-      event.type === 'stream.message'
-      && event.payload?.sessionId === 'session-1'
-      && event.payload?.message?.role === 'user'
+    const hasUserStream = events.some(
+      (event) =>
+        event.type === 'stream.message' &&
+        event.payload?.sessionId === 'session-1' &&
+        event.payload?.message?.role === 'user'
     );
 
     expect(hasUserStream).toBe(true);

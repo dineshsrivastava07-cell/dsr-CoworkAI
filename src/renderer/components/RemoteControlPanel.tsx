@@ -1,6 +1,6 @@
 /**
  * Remote Control Settings Panel
- * Composes sub-components for Feishu/Lark bot remote control configuration.
+ * Composes sub-components for remote desktop control configuration.
  */
 
 import { useState, useEffect } from 'react';
@@ -10,7 +10,7 @@ import { GatewayControlCard } from './remote/GatewayControlCard';
 import { PairingRequestsSection } from './remote/PairingRequestsSection';
 import { PairingGuideCard } from './remote/PairingGuideCard';
 import { ConfigStepNav } from './remote/ConfigStepNav';
-import { FeishuConfigStep } from './remote/FeishuConfigStep';
+import { IndianVncConfigStep } from './remote/IndianVncConfigStep';
 import { ConnectionConfigStep } from './remote/ConnectionConfigStep';
 import { AdvancedConfigStep } from './remote/AdvancedConfigStep';
 import { AuthorizedUsersSection } from './remote/AuthorizedUsersSection';
@@ -23,12 +23,22 @@ import type {
   TunnelStatus,
   ConfigStep,
   LocalizedBanner,
+  IndianVncConfig,
 } from './remote/types';
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
+const DEFAULT_INDIAN_VNC_CONFIG: IndianVncConfig = {
+  enabled: true,
+  provider: 'zoho-assist',
+  portalUrl: 'https://assist.zoho.in',
+  accessMode: 'attended',
+  requireUserConsent: true,
+  auditLogging: true,
+};
+
 export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
-  const { i18n, t } = useTranslation();
+  const { t } = useTranslation();
 
   // Remote state
   const [isLoading, setIsLoading] = useState(true);
@@ -39,12 +49,11 @@ export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
   const [isTogglingGateway, setIsTogglingGateway] = useState(false);
   const [error, setError] = useState<LocalizedBanner | null>(null);
   const [success, setSuccess] = useState<LocalizedBanner | null>(null);
-  const [activeStep, setActiveStep] = useState<ConfigStep>('feishu');
+  const [activeStep, setActiveStep] = useState<ConfigStep>('indianVnc');
 
   // Form state
-  const [feishuAppId, setFeishuAppId] = useState('');
-  const [feishuAppSecret, setFeishuAppSecret] = useState('');
-  const [feishuDmPolicy, setFeishuDmPolicy] = useState('pairing');
+  const [indianVncConfig, setIndianVncConfig] =
+    useState<IndianVncConfig>(DEFAULT_INDIAN_VNC_CONFIG);
   const [gatewayPort, setGatewayPort] = useState(18789);
   const [defaultWorkingDirectory, setDefaultWorkingDirectory] = useState('');
   const [autoApproveSafeTools, setAutoApproveSafeTools] = useState(true);
@@ -95,12 +104,10 @@ export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
         setAutoApproveSafeTools(configResult.gateway?.autoApproveSafeTools !== false);
         setTunnelEnabled(configResult.gateway?.tunnel?.enabled || false);
         setNgrokAuthToken(configResult.gateway?.tunnel?.ngrok?.authToken || '');
-        if (configResult.channels?.feishu) {
-          setFeishuAppId(configResult.channels.feishu.appId || '');
-          setFeishuAppSecret(configResult.channels.feishu.appSecret || '');
-          setFeishuDmPolicy(configResult.channels.feishu.dm?.policy || 'pairing');
-          setUseLongConnection(configResult.channels.feishu.useWebSocket !== false);
-        }
+        setIndianVncConfig({
+          ...DEFAULT_INDIAN_VNC_CONFIG,
+          ...configResult.gateway?.indianVnc,
+        });
       }
     } catch (err) {
       console.error('Failed to load remote config:', err);
@@ -162,17 +169,8 @@ export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
                 ngrok: { authToken: ngrokAuthToken, region: 'us' },
               }
             : { enabled: false, type: 'ngrok' },
+        indianVnc: indianVncConfig,
       });
-
-      if (feishuAppId && feishuAppSecret) {
-        await window.electronAPI.remote.updateFeishuConfig({
-          type: 'feishu',
-          appId: feishuAppId,
-          appSecret: feishuAppSecret,
-          useWebSocket: useLongConnection,
-          dm: { policy: feishuDmPolicy as 'open' | 'pairing' | 'allowlist' },
-        });
-      }
 
       setSuccess({ key: 'remote.configSaved' });
       setTimeout(() => setSuccess(null), 3000);
@@ -233,18 +231,9 @@ export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
     setTimeout(() => setSuccess(null), 2000);
   }
 
-  const isFeishuConfigured = !!(feishuAppId && feishuAppSecret);
+  const isIndianVncConfigured = !!indianVncConfig.portalUrl;
   const isConnectionConfigured =
     useLongConnection || (tunnelEnabled && !!ngrokAuthToken) || !!tunnelStatus?.connected;
-  const permissionSeparator = i18n.language.startsWith('zh') ? '、' : ', ';
-  const permissionScopes = [
-    'im:resource',
-    'im:message',
-    'im:message:send_as_bot',
-    'im:message.group_at_msg:readonly',
-    'im:message.p2p_msg:readonly',
-    'contact:user.base:readonly',
-  ];
 
   if (isLoading) {
     return (
@@ -275,37 +264,30 @@ export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
         pairedUsers={pairedUsers}
         pendingPairings={pendingPairings}
         isTogglingGateway={isTogglingGateway}
-        isFeishuConfigured={isFeishuConfigured}
+        isRemoteDesktopConfigured={isIndianVncConfigured}
         onToggle={toggleGateway}
       />
 
-      {status?.running && feishuDmPolicy === 'pairing' && <PairingGuideCard />}
+      {status?.running && <PairingGuideCard />}
 
       <PairingRequestsSection
         pendingPairings={pendingPairings}
-        showEmpty={status?.running && feishuDmPolicy === 'pairing'}
+        showEmpty={!!status?.running}
         onApprove={approvePairing}
         onReject={rejectPairing}
       />
 
       <ConfigStepNav
         activeStep={activeStep}
-        isFeishuConfigured={isFeishuConfigured}
+        isIndianVncConfigured={isIndianVncConfigured}
         isConnectionConfigured={isConnectionConfigured}
         onStepChange={setActiveStep}
       />
 
       {/* Configuration content */}
       <div className="p-6 rounded-[2rem] border border-border-subtle bg-background/60">
-        {activeStep === 'feishu' && (
-          <FeishuConfigStep
-            feishuAppId={feishuAppId}
-            feishuAppSecret={feishuAppSecret}
-            feishuDmPolicy={feishuDmPolicy}
-            onAppIdChange={setFeishuAppId}
-            onAppSecretChange={setFeishuAppSecret}
-            onDmPolicyChange={setFeishuDmPolicy}
-          />
+        {activeStep === 'indianVnc' && (
+          <IndianVncConfigStep config={indianVncConfig} onChange={setIndianVncConfig} />
         )}
         {activeStep === 'connection' && (
           <ConnectionConfigStep
@@ -351,10 +333,7 @@ export function RemoteControlPanel({ isActive }: { isActive: boolean }) {
 
       <AuthorizedUsersSection pairedUsers={pairedUsers} onRevoke={revokePairing} />
 
-      <QuickStartGuide
-        permissionScopes={permissionScopes}
-        permissionSeparator={permissionSeparator}
-      />
+      <QuickStartGuide />
     </div>
   );
 }

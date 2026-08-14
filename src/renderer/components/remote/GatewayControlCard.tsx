@@ -3,7 +3,7 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { Power, Smartphone, Loader2 } from 'lucide-react';
+import { Power, MonitorCog, Loader2 } from 'lucide-react';
 import type { GatewayStatus, PairedUser, PairingRequest } from './types';
 
 interface Props {
@@ -11,7 +11,7 @@ interface Props {
   pairedUsers: PairedUser[];
   pendingPairings: PairingRequest[];
   isTogglingGateway: boolean;
-  isFeishuConfigured: boolean;
+  isRemoteDesktopConfigured: boolean;
   onToggle: () => void;
 }
 
@@ -20,7 +20,7 @@ export function GatewayControlCard({
   pairedUsers,
   pendingPairings,
   isTogglingGateway,
-  isFeishuConfigured,
+  isRemoteDesktopConfigured,
   onToggle,
 }: Props) {
   const { t } = useTranslation();
@@ -34,7 +34,7 @@ export function GatewayControlCard({
             <div
               className={`p-3 rounded-2xl ${status?.running ? 'bg-success/10' : 'bg-surface-active'}`}
             >
-              <Smartphone
+              <MonitorCog
                 className={`w-8 h-8 ${status?.running ? 'text-success' : 'text-text-muted'}`}
               />
             </div>
@@ -48,7 +48,7 @@ export function GatewayControlCard({
 
           <button
             onClick={onToggle}
-            disabled={isTogglingGateway || !isFeishuConfigured}
+            disabled={isTogglingGateway || !isRemoteDesktopConfigured}
             className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium transition-all ${
               status?.running
                 ? 'bg-error hover:bg-error/90 text-white'

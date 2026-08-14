@@ -35,6 +35,7 @@ export interface RemoteConfig {
     bind: string;
     defaultWorkingDirectory?: string;
     autoApproveSafeTools?: boolean;
+    indianVnc?: IndianVncConfig;
     tunnel?: {
       enabled: boolean;
       type: 'ngrok' | 'cloudflare' | 'frp';
@@ -50,23 +51,19 @@ export interface RemoteConfig {
     };
   };
   channels: {
-    feishu?: {
-      appId: string;
-      appSecret: string;
-      useWebSocket?: boolean;
-      dm: {
-        policy: string;
-      };
-    };
-    slack?: {
-      botToken: string;
-      appToken?: string;
-      useSocketMode?: boolean;
-      dm: {
-        policy: string;
-      };
-    };
+    slack?: Record<string, unknown>;
   };
+}
+
+export interface IndianVncConfig {
+  enabled: boolean;
+  provider: 'zoho-assist' | 'manageengine-remote-access-plus';
+  portalUrl?: string;
+  organizationId?: string;
+  operatorEmail?: string;
+  accessMode: 'attended' | 'unattended';
+  requireUserConsent: boolean;
+  auditLogging: boolean;
 }
 
 export interface TunnelStatus {
@@ -76,6 +73,6 @@ export interface TunnelStatus {
   error?: string;
 }
 
-export type ConfigStep = 'feishu' | 'connection' | 'advanced';
+export type ConfigStep = 'indianVnc' | 'connection' | 'advanced';
 
 export type LocalizedBanner = { key?: string; text?: string | null };

@@ -10,6 +10,8 @@ vi.mock('../src/main/remote/remote-config-store', () => ({
 
 import { RemoteManager } from '../src/main/remote/remote-manager';
 import type { RemoteMessage } from '../src/main/remote/types';
+import type { MessageRouter } from '../src/main/remote/message-router';
+import type { Session } from '../src/renderer/types';
 
 type StartSessionArgs = {
   title: string;
@@ -19,10 +21,10 @@ type StartSessionArgs = {
 
 const buildMessage = (): RemoteMessage => ({
   id: 'msg-1',
-  channelType: 'feishu',
+  channelType: 'websocket',
   channelId: 'channel-1',
   sender: { id: 'user-1', isBot: false },
-  content: { type: 'text', text: '你好' },
+  content: { type: 'text', text: 'hello' },
   timestamp: Date.now(),
   isGroup: false,
   isMentioned: false,
@@ -36,7 +38,7 @@ describe('remote default working dir', () => {
     manager.setAgentExecutor({
       startSession: async (title, prompt, cwd) => {
         calls.push({ title, prompt, cwd });
-        return { id: 'session-1' } as any;
+        return { id: 'session-1' } as unknown as Session;
       },
       continueSession: async () => {},
       stopSession: async () => {},
@@ -44,7 +46,7 @@ describe('remote default working dir', () => {
 
     manager.setDefaultWorkingDirectory('/tmp/default_workdir');
 
-    const router = (manager as any).messageRouter;
+    const router = (manager as unknown as { messageRouter: MessageRouter }).messageRouter;
     await router.routeMessage(buildMessage());
 
     expect(calls).toHaveLength(1);
