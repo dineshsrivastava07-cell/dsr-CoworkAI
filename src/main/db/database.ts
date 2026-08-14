@@ -104,6 +104,9 @@ export interface ScheduledTaskRow {
   repeat_every: number | null;
   repeat_unit: string | null;
   enabled: number;
+  watch_config: string | null;
+  last_checked_state: string | null;
+  last_checked_at: number | null;
   last_run_at: number | null;
   last_run_session_id: string | null;
   last_error: string | null;
@@ -341,6 +344,9 @@ function initializeSchema(database: Database.Database): void {
     )
   `);
     ensureColumn(database, 'scheduled_tasks', 'schedule_config', 'schedule_config TEXT');
+    ensureColumn(database, 'scheduled_tasks', 'watch_config', 'watch_config TEXT');
+    ensureColumn(database, 'scheduled_tasks', 'last_checked_state', 'last_checked_state TEXT');
+    ensureColumn(database, 'scheduled_tasks', 'last_checked_at', 'last_checked_at INTEGER');
 
     database.exec(`
     CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_next_run
@@ -491,9 +497,9 @@ export function initDatabase(): DatabaseInstance {
 
   const insertScheduledTask = rawDb.prepare(`
     INSERT OR REPLACE INTO scheduled_tasks (
-      id, title, prompt, cwd, run_at, next_run_at, schedule_config, repeat_every, repeat_unit, enabled, last_run_at, last_run_session_id, last_error, created_at, updated_at
+      id, title, prompt, cwd, run_at, next_run_at, schedule_config, repeat_every, repeat_unit, enabled, watch_config, last_checked_state, last_checked_at, last_run_at, last_run_session_id, last_error, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const getScheduledTaskStmt = rawDb.prepare(`
@@ -662,6 +668,9 @@ export function initDatabase(): DatabaseInstance {
           task.repeat_every,
           task.repeat_unit,
           task.enabled,
+          task.watch_config,
+          task.last_checked_state,
+          task.last_checked_at,
           task.last_run_at,
           task.last_run_session_id,
           task.last_error,

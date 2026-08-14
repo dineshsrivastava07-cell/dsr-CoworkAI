@@ -30,7 +30,7 @@ Open Cowork is an open-source AI agent desktop app for Windows and macOS with on
 - Includes built-in Skills for generating and processing PPTX, DOCX, XLSX, and PDF files.
 - Integrates external tools through the Model Context Protocol (MCP), including browser and Notion-style tool connectors when configured.
 - Supports GUI automation through computer use.
-- Supports remote control through Feishu (Lark) and Slack integration.
+- Supports India-focused remote desktop coordination and approved collaboration integrations.
 - Shows reasoning and tool execution traces in the app UI.
 - Provides English and Chinese interface/content.
 
@@ -97,7 +97,7 @@ Any provider with an OpenAI-compatible API can be configured when compatible wit
 
 ## Release Context
 
-The changelog lists Open Cowork 3.3.0 on 2026-04-18 as the first stable release of the 3.3.x series. Public release notes mention Feishu remote control improvements, the official VitePress website, Codex-powered PR and issue automation workflows, ROADMAP.md, SEO improvements, platform build changes, security hardening, screenshot result handling, model preset updates, and dependency management policy.
+The changelog lists Open Cowork 3.3.0 on 2026-04-18 as the first stable release of the 3.3.x series. Public release notes mention remote control improvements, the official VitePress website, Codex-powered PR and issue automation workflows, ROADMAP.md, SEO improvements, platform build changes, security hardening, screenshot result handling, model preset updates, and dependency management policy.
 
 ## FAQ
 
@@ -107,7 +107,7 @@ Open Cowork is a free, open-source AI agent desktop application for Windows and 
 
 ### How is Open Cowork different from Claude Cowork?
 
-The README describes Open Cowork as the open-source implementation of Claude Cowork, with multi-model support, GUI automation through computer use, remote control through Feishu/Slack, and VM-level sandbox isolation.
+The README describes Open Cowork with multi-model support, GUI automation through computer use, India-focused remote desktop coordination, approved collaboration integrations, and VM-level sandbox isolation.
 
 ### Is Open Cowork free?
 

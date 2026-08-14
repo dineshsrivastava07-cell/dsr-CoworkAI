@@ -34,13 +34,18 @@ This issue is the master roadmap. Each section includes: current state (what exi
 
 ## 0. Headless / CLI Mode — Run Without GUI
 
+> **Status: DONE.** This section is stale — headless mode is already implemented, not a
+> gap. See `src/main/cli/headless-io.ts` (`parseHeadlessArgs()`: `--headless`, `-p/--prompt`,
+> `--cwd`, `--auto-approve`, `--mode rpc|stdio`) and its wiring in `src/main/index.ts` (prompt
+> mode, RPC mode, stdio mode). Left below for historical context only.
+
 ### Current State
 
 The codebase is **already highly decoupled from Electron GUI**, with three independent proofs:
 
 1. **Test suite** (`vitest`): `tests/mocks/electron.ts` shims `app.getPath`, `BrowserWindow`, `dialog`, `ipcMain`. The entire core (`SessionManager`, `ConfigStore`, `MCPManager`, `MemoryService`) runs under plain Node in CI — every commit validates "core works without Electron."
 
-2. **Remote system** (Feishu/Slack): `RemoteGateway` (`remote/gateway.ts`) is a pure-Node `http.Server` + `ws.WebSocketServer` (zero Electron imports). It already handles the full session lifecycle without GUI, including permission flow (5-minute timeout → default deny).
+2. **Remote system** (remote desktop/collaboration gateway): `RemoteGateway` (`remote/gateway.ts`) is a pure-Node `http.Server` + `ws.WebSocketServer` (zero Electron imports). It already handles the full session lifecycle without GUI, including permission flow (5-minute timeout → default deny).
 
 3. **`ClaudeAgentRunner`** has zero GUI dependency. It's constructed with 4 plain callbacks (`sendToRenderer`, `saveMessage`, `requestPermission`, `requestSudoPassword`). Swap them for stdio equivalents and the entire engine runs unmodified.
 
@@ -124,11 +129,18 @@ echo '{"type":"session.start","prompt":"what model are you?"}' | dsr-coworkai --
 
 ## 1. Config 文件化 — Agent-Accessible Configuration
 
+> **Status: DONE.** This section is stale — agent config self-awareness is already
+> implemented, not a gap. See `src/main/config/config-extension.ts`: `config_read` and
+> `config_write` (permission: `always-ask`) custom tools, `SAFE_TOP_LEVEL_KEYS` /
+> `WRITABLE_KEYS` / `BLOCKED_TOP_LEVEL_KEYS` / `SENSITIVE_KEY_PATTERN` for the safe/secret
+> field split, registered via `ConfigExtension` in `src/main/index.ts`. Left below for
+> historical context only.
+
 ### Current State
 
 - **Main config** (`config-store.ts`): 21 fields in `AppConfig`, encrypted via AES-256-CBC (`store-encryption.ts`). Key derived from `hostname + hardcoded seed` — obfuscation, not real security.
 - **Unencrypted stores**: `mcp-config.json` (MCP server definitions), `plugin-registry.json` (installed plugins). These are already plaintext JSON on disk.
-- **Encrypted stores**: `remote-config.json` (Feishu/Telegram/Slack secrets — correctly encrypted).
+- **Encrypted stores**: `remote-config.json` (remote gateway and collaboration secrets — correctly encrypted).
 - **Agent awareness**: The agent knows **nothing** about its own config. No `model`, `contextWindow`, `provider`, or `memoryEnabled` in the system prompt. No config read/write tools exposed.
 
 ### Gap
@@ -175,6 +187,14 @@ echo '{"type":"session.start","prompt":"what model are you?"}' | dsr-coworkai --
 ---
 
 ## 2. Subagent — Parallel Child Agent Execution
+
+> **Status: DONE.** This section is stale — subagents are already implemented, not a gap.
+> See `src/main/agent/subagent-extension.ts` (476 lines): `spawn_subagent` custom tool,
+> `MAX_CONCURRENT_SUBAGENTS = 3`, configurable timeout (120s default / 300s max), progress
+> events, permission gating, parent-cancellation propagation, MCP tool inheritance via
+> `allowed_tools`. `createAgentSession()` has two call sites in the codebase: the main
+> session (`agent-runner.ts`) and this child-session path. Registered via `SubagentExtension`
+> in `src/main/index.ts`. Left below for historical context only.
 
 ### Current State
 
@@ -352,6 +372,18 @@ Default settings: `reserveTokens: 16384`, `keepRecentTokens: 20000`
 ---
 
 ## 4. Reactive Polling — Condition-Based Agent Triggering
+
+> **Status: Phase 1 DONE.** `WatchConfig` (`checkType: 'http' | 'command'`), the
+> `watch_config`/`last_checked_state`/`last_checked_at` columns (via the existing
+> `ensureColumn` migration pattern), and the check-then-act split in
+> `ScheduledTaskManager.handleTrigger()`/`runWatchCheck()` are implemented and tested
+> (`src/main/schedule/scheduled-task-manager.ts`, `tests/scheduled-task-manager.test.ts`).
+> `defaultCheckCondition()` does real HTTP status+body-hash or command exit-code+stdout-hash
+> comparison, with a 60s minimum poll interval enforced in `normalizeWatchConfig()` (closes
+> the "polling interval minimum" open question below). Still open: Phase 2 (`checkType:
+'agent'`, using the now-confirmed-existing `SubagentExtension`) and Phase 3 (the
+> Schedule-vs-Watch UI toggle in `SettingsSchedule.tsx` — the backend is IPC-reachable today
+> via `schedule.create`/`schedule.update`, just without a form for it yet).
 
 ### Current State
 

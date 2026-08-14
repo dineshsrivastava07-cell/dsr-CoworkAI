@@ -2,7 +2,7 @@
 
 > Canonical AI-readable summary for Open Cowork. This file describes public project facts for search, retrieval, citation, and assistant context.
 
-Open Cowork is a free, open-source AI agent desktop application for Windows and macOS. It wraps Claude Code, OpenAI-compatible APIs, Gemini, DeepSeek, GLM, MiniMax, Kimi, and other AI models into a graphical desktop app with one-click installers. It includes VM sandbox isolation, built-in Skills, MCP integration, GUI automation, and remote control through Feishu (Lark) and Slack.
+Open Cowork is a free, open-source AI agent desktop application for Windows and macOS. It wraps Claude Code, OpenAI-compatible APIs, Gemini, DeepSeek, GLM, MiniMax, Kimi, and other AI models into a graphical desktop app with one-click installers. It includes VM sandbox isolation, built-in Skills, MCP integration, GUI automation, and India-focused remote desktop coordination.
 
 ## Canonical URLs
 
