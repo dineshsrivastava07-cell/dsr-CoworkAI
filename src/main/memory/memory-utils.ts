@@ -191,6 +191,34 @@ export function compactTranscript(turns: MemoryTranscriptTurn[]): string {
   return turns.map((turn) => `${turn.role}: ${turn.content.trim()}`).join('\n');
 }
 
+// Tool results that clearly signal a failed/no-op action (e.g. browser automation
+// tools like Chrome MCP return descriptive failure text without ever setting the
+// MCP-level `isError` flag, so it can't be relied on here).
+const TOOL_FAILURE_SIGNAL_PATTERN =
+  /\b(no page selected|navigation timeout|has been closed|timed?\s*out|could not|unable to|failed to|error:)\b/i;
+
+/**
+ * Heuristic guard against memorizing a session whose tool interactions were
+ * mostly failures (e.g. a browser-automation task that kept erroring out).
+ * Summarizing such a session and re-injecting it as "prior experience" on a
+ * later, similar request primes the model with the same failure/derailment
+ * instead of helping it — this exists to prevent that feedback loop.
+ */
+export function looksLikeDegenerateAutomationSession(messages: Message[]): boolean {
+  let total = 0;
+  let failures = 0;
+  for (const message of messages) {
+    for (const block of message.content) {
+      if (block.type !== 'tool_result') continue;
+      total += 1;
+      if (TOOL_FAILURE_SIGNAL_PATTERN.test(block.content)) {
+        failures += 1;
+      }
+    }
+  }
+  return total >= 3 && failures / total >= 0.5;
+}
+
 export function summarizeText(text: string, maxLength = 220): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (!normalized) {

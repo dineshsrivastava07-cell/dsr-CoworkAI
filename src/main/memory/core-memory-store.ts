@@ -10,6 +10,7 @@ import {
   parseCoreCombinedKey,
   saveJsonFile,
 } from './memory-utils';
+import { DEFAULT_CORE_MEMORY_SEED } from './default-core-memory';
 
 export class CoreMemoryStore {
   private readonly memory: Record<string, string>;
@@ -18,7 +19,7 @@ export class CoreMemoryStore {
     private readonly filePath: string,
     private readonly maxItems = 24
   ) {
-    const raw = loadJsonFile<Record<string, unknown>>(filePath, {});
+    const raw = loadJsonFile<Record<string, unknown>>(filePath, DEFAULT_CORE_MEMORY_SEED);
     const normalized: Record<string, string> = {};
     for (const [key, value] of Object.entries(raw)) {
       if (typeof value === 'string' && key.trim()) {

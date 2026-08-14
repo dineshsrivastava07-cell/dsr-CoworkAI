@@ -38,6 +38,7 @@ import {
   isSubPath,
   isoNow,
   loadJsonFile,
+  looksLikeDegenerateAutomationSession,
   messagesToTranscript,
   normalizeWorkspaceKey,
   safeRemoveFile,
@@ -505,7 +506,12 @@ export class MemoryService {
         stateStore.delete(session.id);
         return;
       }
-      if (fullTurns.length) {
+      if (fullTurns.length && looksLikeDegenerateAutomationSession(messages)) {
+        logWarn(
+          '[MemoryService] Session tool results were mostly failures — skipping experience-memory extraction to avoid memorizing a derailed attempt:',
+          session.id
+        );
+      } else if (fullTurns.length) {
         const extracted = await this.experienceExtractor.extractSession({
           sessionId: session.id,
           sessionDate,
@@ -583,13 +589,21 @@ export class MemoryService {
       const fullTurns = messagesToTranscript(fullMessages);
       const sessionDate = this.resolveSessionDate(session, fullMessages);
       const sourceWorkspace = normalizeWorkspaceKey(session.cwd);
-      const extracted = fullTurns.length
-        ? await this.experienceExtractor.extractSession({
-            sessionId: session.id,
-            sessionDate,
-            turns: fullTurns,
-          })
-        : { sessionSummary: '', sessionKeywords: [], chunks: [] };
+      const skipDegenerate = fullTurns.length && looksLikeDegenerateAutomationSession(fullMessages);
+      if (skipDegenerate) {
+        logWarn(
+          '[MemoryService] Session tool results were mostly failures — skipping experience-memory extraction during rebuild:',
+          session.id
+        );
+      }
+      const extracted =
+        fullTurns.length && !skipDegenerate
+          ? await this.experienceExtractor.extractSession({
+              sessionId: session.id,
+              sessionDate,
+              turns: fullTurns,
+            })
+          : { sessionSummary: '', sessionKeywords: [], chunks: [] };
       return {
         sessionRow,
         session,
