@@ -24,4 +24,27 @@ describe('Office Tools source-driven artifact generation', () => {
     expect(officeToolsContent).not.toContain('Confirm wave sequencing');
     expect(officeToolsContent).not.toContain('Quarterly Business Review');
   });
+
+  it('routes AI content generation through the shared ollama-content helper, not a private fetch', () => {
+    expect(officeToolsContent).toContain("from '../config/ollama-content'");
+    expect(officeToolsContent).toContain('callOllamaChat(');
+    expect(officeToolsContent).toContain('validateGeneratedContent(');
+    expect(officeToolsContent).not.toContain("fetch('http://localhost:11434");
+  });
+
+  it('retries once with a stricter reminder before giving up on invalid/placeholder content', () => {
+    expect(officeToolsContent).toContain('STRICT_RETRY_REMINDER');
+    expect(officeToolsContent).toContain('attempt < 2');
+  });
+
+  it('supports an Excel data-bar analytics visual on a numeric column', () => {
+    expect(officeToolsContent).toContain('ExcelChartDef');
+    expect(officeToolsContent).toContain("type: 'dataBar'");
+    expect(officeToolsContent).toContain('addConditionalFormatting');
+  });
+
+  it('supports a native chart slide layout in presentations', () => {
+    expect(officeToolsContent).toContain('PptChartDef');
+    expect(officeToolsContent).toContain('s.addChart(');
+  });
 });

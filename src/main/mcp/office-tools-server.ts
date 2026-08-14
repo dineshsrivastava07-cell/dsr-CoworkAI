@@ -1,5 +1,5 @@
 /**
- * Office Tools MCP Server for dsr-CoworkAI
+ * Office Tools MCP Server for V-Coworker
  *
  * Creates Excel (.xlsx), Word (.docx), and PowerPoint (.pptx) files
  * based on structured content provided by the agent.
@@ -15,6 +15,12 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import {
+  callOllamaChat,
+  extractJsonObject,
+  pickModelForTask,
+  validateGeneratedContent,
+} from '../config/ollama-content';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -32,6 +38,11 @@ async function ensureDir(dir: string): Promise<void> {
 
 // ─── Excel ──────────────────────────────────────────────────────────────────
 
+interface ExcelChartDef {
+  /** 0-based index of the numeric column to visualize as an in-cell data bar. */
+  value_column: number;
+}
+
 interface ExcelSheetDef {
   name: string;
   headers: string[];
@@ -39,6 +50,8 @@ interface ExcelSheetDef {
   column_widths?: number[];
   freeze_header?: boolean;
   add_totals_row?: boolean;
+  /** Optional analytics visual: renders a native Excel data-bar over a numeric column. */
+  chart?: ExcelChartDef;
 }
 
 interface CreateExcelParams {
@@ -50,7 +63,7 @@ interface CreateExcelParams {
 async function createExcel(params: CreateExcelParams): Promise<string> {
   const ExcelJS = await import('exceljs');
   const wb = new ExcelJS.default.Workbook();
-  wb.creator = 'dsr-CoworkAI';
+  wb.creator = 'V-Coworker';
   wb.created = new Date();
 
   const outDir = params.output_dir || defaultOutputDir();
@@ -153,6 +166,32 @@ async function createExcel(params: CreateExcelParams): Promise<string> {
         ws.getColumn(i + 1).width = Math.min(Math.max(maxLen + 4, 12), 40);
       });
     }
+
+    // Analytics visual: native Excel data-bar over a numeric column (ExcelJS has no
+    // chart-object API, so a data-bar conditional format is the supported way to add
+    // an at-a-glance visual without embedding a fragile image).
+    if (
+      sheetDef.chart &&
+      sheetDef.rows &&
+      sheetDef.rows.length > 0 &&
+      sheetDef.chart.value_column >= 0 &&
+      sheetDef.chart.value_column < sheetDef.headers.length
+    ) {
+      const colLetter = ws.getColumn(sheetDef.chart.value_column + 1).letter;
+      const dataStart = 2;
+      const dataEnd = sheetDef.rows.length + 1;
+      ws.addConditionalFormatting({
+        ref: `${colLetter}${dataStart}:${colLetter}${dataEnd}`,
+        rules: [
+          {
+            type: 'dataBar',
+            priority: 1,
+            cfvo: [{ type: 'min' }, { type: 'max' }],
+            gradient: true,
+          },
+        ],
+      });
+    }
   }
 
   await wb.xlsx.writeFile(outPath);
@@ -167,6 +206,21 @@ function slugify(text: string): string {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_|_$/g, '')
     .slice(0, 40);
+}
+
+/**
+ * Defense-in-depth: a small/local model asked to fill a tool's `description` argument can
+ * end up echoing its OWN prior conversational sentence ("I will now generate this Excel
+ * file...") instead of describing the artifact. Using that verbatim as a filename basis
+ * produces nonsense like "i_will_now_generate_this_excel.xlsx". This is a last-resort guard
+ * at the tool boundary — the primary fix lives upstream in agent-runner.ts's interceptor,
+ * which never looks at assistant text in the first place; this catches whatever reaches here
+ * regardless of which path it came from.
+ */
+export function looksLikeAssistantEcho(desc: string): boolean {
+  return /^(i will|i'll|i am going to|let me|sure[,.]|okay[,.]|now i|here is|here's)\b/i.test(
+    desc.trim()
+  );
 }
 
 function detectDocType(desc: string): string {
@@ -886,9 +940,9 @@ async function createWordDocument(params: CreateWordParams): Promise<string> {
   }
 
   const doc = new Document({
-    creator: params.author || 'dsr-CoworkAI',
+    creator: params.author || 'V-Coworker',
     title: params.title || 'Document',
-    description: `Created by dsr-CoworkAI`,
+    description: `Created by V-Coworker`,
     sections: [
       {
         properties: {},
@@ -918,14 +972,26 @@ interface PptTableDef {
   rows: string[][];
 }
 
+interface PptChartSeries {
+  name: string;
+  values: number[];
+}
+
+interface PptChartDef {
+  type: 'bar' | 'pie' | 'line' | 'doughnut';
+  categories: string[];
+  series: PptChartSeries[];
+}
+
 interface PptSlide {
-  layout: 'title' | 'content' | 'two_column' | 'table' | 'blank';
+  layout: 'title' | 'content' | 'two_column' | 'table' | 'chart' | 'blank';
   title?: string;
   subtitle?: string;
   bullets?: (string | PptBullet)[];
   left_bullets?: (string | PptBullet)[];
   right_bullets?: (string | PptBullet)[];
   table?: PptTableDef;
+  chart?: PptChartDef;
   notes?: string;
 }
 
@@ -1794,7 +1860,7 @@ async function createPresentation(params: CreatePresentationParams): Promise<str
   const THEME_LIGHT = 'D6E4F0';
   const ACCENT = '2E74B5';
 
-  prs.author = params.author || 'dsr-CoworkAI';
+  prs.author = params.author || 'V-Coworker';
   prs.title = params.title || 'Presentation';
 
   // Define master layout
@@ -1807,7 +1873,7 @@ async function createPresentation(params: CreatePresentationParams): Promise<str
       // Footer text
       {
         text: {
-          text: params.title || 'dsr-CoworkAI',
+          text: params.title || 'V-Coworker',
           options: {
             x: 0.3,
             y: 6.95,
@@ -1857,7 +1923,7 @@ async function createPresentation(params: CreatePresentationParams): Promise<str
         align: 'center',
       });
     }
-    titleSlide.addText('dsr-CoworkAI', {
+    titleSlide.addText('V-Coworker', {
       x: 0.5,
       y: 4.5,
       w: 9.0,
@@ -2044,6 +2110,39 @@ async function createPresentation(params: CreatePresentationParams): Promise<str
         break;
       }
 
+      case 'chart': {
+        s.addShape(prs.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 1.1, fill: { color: THEME } });
+        s.addText(slide.title || '', {
+          x: 0.3,
+          y: 0.1,
+          w: 9.4,
+          h: 0.9,
+          color: 'FFFFFF',
+          fontSize: 24,
+          bold: true,
+          fontFace: 'Calibri',
+          valign: 'middle',
+        });
+        if (slide.chart && slide.chart.series.length > 0 && slide.chart.categories.length > 0) {
+          const chartData = slide.chart.series.map((series) => ({
+            name: series.name,
+            labels: slide.chart!.categories,
+            values: series.values,
+          }));
+          s.addChart(slide.chart.type, chartData, {
+            x: 0.5,
+            y: 1.3,
+            w: 9.0,
+            h: 5.2,
+            showLegend: slide.chart.series.length > 1,
+            legendPos: 'b',
+            showTitle: false,
+            chartColors: [THEME, ACCENT, 'FFD966', '9DC3E6', 'D6E4F0'],
+          });
+        }
+        break;
+      }
+
       case 'blank': {
         if (slide.title) {
           s.addText(slide.title, {
@@ -2096,6 +2195,14 @@ function cleanFileContent(raw: string): string {
     .slice(0, 6000); // cap at 6000 chars for Ollama context
 }
 
+/**
+ * One retry attempt with a stricter, placeholder-forbidding reminder appended
+ * to the system prompt — used when the first response fails
+ * validateGeneratedContent() (invalid JSON or bracket/generic placeholder text).
+ */
+const STRICT_RETRY_REMINDER =
+  '\n\nYour previous answer contained a placeholder (e.g. "[X]", "[Goal]", "$X", "Key win", "Challenge 1") or was not valid JSON. This is not acceptable. Return ONLY valid JSON with concrete, specific content — every value must be a real fact, number, or sentence, never a bracketed stand-in.';
+
 async function callOllamaForContent(
   description: string,
   docType: 'excel' | 'word' | 'ppt'
@@ -2117,18 +2224,19 @@ async function callOllamaForContent(
     const rawFileBlock = description.slice(sepIdx);
     const fileContent = cleanFileContent(rawFileBlock);
 
-    // Use the more capable 26b model for file-based generation
-    model = 'gemma4:26b';
+    // Use the more capable model for file-based generation
+    model = pickModelForTask('complex');
 
     const fileSchemas: Record<string, string> = {
-      excel: `{"sheets":[{"name":"SheetName","headers":["Col1","Col2"],"rows":[["actual value","actual value"]],"freeze_header":true}]}`,
+      excel: `{"sheets":[{"name":"SheetName","headers":["Col1","Col2"],"rows":[["actual value","actual value"]],"freeze_header":true,"chart":{"value_column":1}}]}`,
       word: `{"title":"Actual document title","blocks":[{"type":"paragraph","heading":"Section","heading_level":1,"text":"Actual content from file"},{"type":"bullet_list","items":["Actual fact from file"]}]}`,
-      ppt: `{"title":"Actual title from file","subtitle":"Actual subtitle","slides":[{"layout":"content","title":"Actual slide title","bullets":["Actual fact: specific number or detail from file"]},{"layout":"table","title":"Data Table","table":{"headers":["Col A","Col B"],"rows":[["actual","actual"]]}}]}`,
+      ppt: `{"title":"Actual title from file","subtitle":"Actual subtitle","slides":[{"layout":"content","title":"Actual slide title","bullets":["Actual fact: specific number or detail from file"]},{"layout":"table","title":"Data Table","table":{"headers":["Col A","Col B"],"rows":[["actual","actual"]]}},{"layout":"chart","title":"Trend","chart":{"type":"bar","categories":["actual","actual"],"series":[{"name":"Actual metric","values":[0,0]}]}}]}`,
     };
 
     const fileInstructions: Record<string, string> = {
       excel: `Extract data from the file content below and organize it into Excel sheets.
-Every row must contain ACTUAL values from the file — no placeholders, no invented data.`,
+Every row must contain ACTUAL values from the file — no placeholders, no invented data.
+If a sheet has a clear numeric column worth visualizing, add "chart":{"value_column":N} (0-based index) to that sheet — omit "chart" entirely otherwise.`,
       word: `Extract key information from the file content below and write a professional document.
 Every section must contain ACTUAL content from the file — no [brackets], no invented text.`,
       ppt: `Extract key facts from the file content below and create presentation slides.
@@ -2136,7 +2244,8 @@ STRICT RULES:
 - Every bullet must state an ACTUAL fact from the file (real numbers, real names, real dates)
 - NEVER write "$X", "[Goal]", "[Achievement]", "Key win", "Challenge 1" or any generic placeholder
 - The title must be the actual project/document name found in the file
-- Include the actual timeline, phases, teams, metrics — whatever is in the file`,
+- Include the actual timeline, phases, teams, metrics — whatever is in the file
+- If the file contains a clear numeric series (metrics over time, category comparisons), add one "layout":"chart" slide with real categories/values instead of a generic bullet slide`,
     };
 
     messages = [
@@ -2152,22 +2261,23 @@ ${fileInstructions[docType]}`,
       },
     ];
   } else {
-    // No file — plain description, use fast e4b model
-    model = process.env.OLLAMA_MODEL || 'gemma4:e4b';
+    // No file — plain description, use the fast model
+    model = pickModelForTask('simple');
 
     const plainPrompts: Record<string, string> = {
       excel: `You are a data analyst. Generate Excel spreadsheet data as JSON.
 Return ONLY valid JSON, no markdown fences.
-Schema: {"sheets":[{"name":"SheetName","headers":["Col1","Col2","Col3"],"rows":[["val","val",0]],"freeze_header":true}]}
-Use specific realistic data — at least 8–15 rows. Row values must align with headers.`,
+Schema: {"sheets":[{"name":"SheetName","headers":["Col1","Col2","Col3"],"rows":[["val","val",0]],"freeze_header":true,"chart":{"value_column":2}}]}
+Use specific realistic data — at least 8–15 rows. Row values must align with headers.
+"chart" is optional — include it only on a sheet with a meaningful numeric column (value_column is its 0-based index), omit it otherwise.`,
       word: `You are a professional writer. Generate Word document content as JSON.
 Return ONLY valid JSON, no markdown fences.
 Schema: {"title":"Title","blocks":[{"type":"paragraph","heading":"Section","heading_level":1,"text":"Content"},{"type":"bullet_list","items":["Point 1"]}]}
 Write real professional content — no placeholder text. Include at least 5 sections.`,
       ppt: `You are a presentation designer. Generate PowerPoint content as JSON.
 Return ONLY valid JSON, no markdown fences.
-Schema: {"title":"Title","subtitle":"Subtitle","slides":[{"layout":"content","title":"Slide","bullets":["Specific point"]},{"layout":"table","title":"Data","table":{"headers":["A","B"],"rows":[["val","val"]]}}]}
-Layouts: content|table|two_column|blank. Write specific bullets — no generic placeholders. 5–7 slides.`,
+Schema: {"title":"Title","subtitle":"Subtitle","slides":[{"layout":"content","title":"Slide","bullets":["Specific point"]},{"layout":"table","title":"Data","table":{"headers":["A","B"],"rows":[["val","val"]]}},{"layout":"chart","title":"Chart title","chart":{"type":"bar","categories":["Q1","Q2"],"series":[{"name":"Revenue","values":[10,20]}]}}]}
+Layouts: content|table|two_column|chart|blank. Write specific bullets — no generic placeholders. Include one chart slide only if there's a real metric worth visualizing. 5–7 slides.`,
     };
 
     messages = [
@@ -2176,30 +2286,33 @@ Layouts: content|table|two_column|blank. Write specific bullets — no generic p
     ];
   }
 
-  try {
-    const resp = await fetch('http://localhost:11434/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages,
-        stream: false,
-        options: { temperature: 0.2, num_predict: 4000 },
-      }),
-      signal: AbortSignal.timeout(120000), // 2 min for 26b
-    });
-    if (!resp.ok) return null;
-    const data = (await resp.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const content = data.choices?.[0]?.message?.content ?? '';
-    // Strip markdown fences and extract the outermost JSON object
-    const stripped = content.replace(/```(?:json)?|```/g, '').trim();
-    const match = stripped.match(/\{[\s\S]*\}/);
-    return match ? match[0] : null;
-  } catch {
-    return null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const attemptMessages =
+      attempt === 0
+        ? messages
+        : messages.map((m, i) =>
+            i === 0 ? { ...m, content: m.content + STRICT_RETRY_REMINDER } : m
+          );
+
+    const content = await callOllamaChat(
+      attemptMessages as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+      { model, timeoutMs: 120000, numPredict: 4000 }
+    );
+    if (!content) {
+      continue; // network/timeout/HTTP failure — retry once, then fall back
+    }
+    const json = extractJsonObject(content);
+    if (!json) {
+      continue;
+    }
+    const validation = validateGeneratedContent(json);
+    if (validation.valid) {
+      return json;
+    }
+    // Invalid on first attempt: retry with a stricter prompt. Invalid again: give up
+    // and let the caller fall back to a hardcoded template generator.
   }
+  return null;
 }
 
 // ─── MCP Server ─────────────────────────────────────────────────────────────
@@ -2224,7 +2337,7 @@ function createMcpServer() {
               description: {
                 type: 'string',
                 description:
-                  'PREFERRED: natural-language description of what to create (e.g. "stationery invoice", "monthly sales report"). The tool auto-generates appropriate content. Use this alone with filename for the simplest call.',
+                  'PREFERRED: natural-language description of WHAT TO CREATE (e.g. "stationery invoice", "monthly sales report", "school fees collection tracker with student ID, fee type, amount due, amount paid, balance"). The tool auto-generates appropriate content. Use this alone with filename for the simplest call. Describe the artifact itself — never narrate your own actions (do not write "I will now create..." or "Let me generate..."; describe the content, not the act of creating it).',
               },
               filename: {
                 type: 'string',
@@ -2274,6 +2387,18 @@ function createMcpServer() {
                       type: 'boolean',
                       description: 'Add a SUM totals row for numeric columns',
                     },
+                    chart: {
+                      type: 'object',
+                      description:
+                        'Optional analytics visual: renders a native Excel data-bar over a numeric column so values are visible at a glance.',
+                      properties: {
+                        value_column: {
+                          type: 'number',
+                          description: '0-based index of the numeric column to visualize',
+                        },
+                      },
+                      required: ['value_column'],
+                    },
                   },
                   required: ['name', 'headers', 'rows'],
                 },
@@ -2292,7 +2417,7 @@ function createMcpServer() {
               description: {
                 type: 'string',
                 description:
-                  'PREFERRED: natural-language description of what to create (e.g. "project proposal", "business report", "meeting agenda"). Auto-generates content.',
+                  'PREFERRED: natural-language description of WHAT TO CREATE (e.g. "project proposal", "business report", "meeting agenda"). Auto-generates content. Describe the artifact itself — never narrate your own actions (do not write "I will now create..." or "Let me generate..."; describe the content, not the act of creating it).',
               },
               filename: {
                 type: 'string',
@@ -2373,7 +2498,7 @@ function createMcpServer() {
               description: {
                 type: 'string',
                 description:
-                  'PREFERRED: natural-language description (e.g. "startup pitch deck", "quarterly sales review", "product training"). Auto-generates slides.',
+                  'PREFERRED: natural-language description of WHAT TO CREATE (e.g. "startup pitch deck", "quarterly sales review", "product training"). Auto-generates slides. Describe the artifact itself — never narrate your own actions (do not write "I will now create..." or "Let me generate..."; describe the content, not the act of creating it).',
               },
               filename: {
                 type: 'string',
@@ -2407,9 +2532,9 @@ function createMcpServer() {
                   properties: {
                     layout: {
                       type: 'string',
-                      enum: ['title', 'content', 'two_column', 'table', 'blank'],
+                      enum: ['title', 'content', 'two_column', 'table', 'chart', 'blank'],
                       description:
-                        'title=section title slide, content=bulleted content, two_column=side-by-side, table=data table, blank=empty canvas',
+                        'title=section title slide, content=bulleted content, two_column=side-by-side, table=data table, chart=native bar/pie/line/doughnut chart, blank=empty canvas',
                     },
                     title: { type: 'string', description: 'Slide title' },
                     subtitle: { type: 'string', description: 'Subtitle (for title layout only)' },
@@ -2471,6 +2596,26 @@ function createMcpServer() {
                       },
                       required: ['headers', 'rows'],
                     },
+                    chart: {
+                      type: 'object',
+                      description: 'Chart data for chart layout',
+                      properties: {
+                        type: { type: 'string', enum: ['bar', 'pie', 'line', 'doughnut'] },
+                        categories: { type: 'array', items: { type: 'string' } },
+                        series: {
+                          type: 'array',
+                          items: {
+                            type: 'object',
+                            properties: {
+                              name: { type: 'string' },
+                              values: { type: 'array', items: { type: 'number' } },
+                            },
+                            required: ['name', 'values'],
+                          },
+                        },
+                      },
+                      required: ['type', 'categories', 'series'],
+                    },
                     notes: { type: 'string', description: 'Speaker notes for this slide' },
                   },
                   required: ['layout'],
@@ -2503,7 +2648,8 @@ function createMcpServer() {
           let params: CreateExcelParams;
           if (!raw.sheets || raw.sheets.length === 0) {
             const desc = raw.description || raw.filename || 'spreadsheet';
-            const fname = raw.filename || slugify(desc) || 'spreadsheet';
+            const fname =
+              raw.filename || (!looksLikeAssistantEcho(desc) && slugify(desc)) || 'spreadsheet';
             const shouldBuildWbs =
               /\b(wbs|work breakdown|project plan|tasks? and sub[- ]?tasks?|task breakdown|implementation plan)\b/i.test(
                 desc
@@ -2558,7 +2704,8 @@ function createMcpServer() {
           let params: CreateWordParams;
           if (!raw.blocks || raw.blocks.length === 0) {
             const desc = raw.description || raw.title || raw.filename || 'document';
-            const fname = raw.filename || slugify(desc) || 'document';
+            const fname =
+              raw.filename || (!looksLikeAssistantEcho(desc) && slugify(desc)) || 'document';
             const aiJson = await callOllamaForContent(desc, 'word');
             if (aiJson) {
               try {
@@ -2605,7 +2752,8 @@ function createMcpServer() {
           let params: CreatePresentationParams;
           if (!raw.slides || raw.slides.length === 0) {
             const desc = raw.description || raw.title || raw.filename || 'presentation';
-            const fname = raw.filename || slugify(desc) || 'presentation';
+            const fname =
+              raw.filename || (!looksLikeAssistantEcho(desc) && slugify(desc)) || 'presentation';
             const workbookParams = raw.source_file
               ? await generatePresentationFromWorkbookSource(raw.source_file, fname).catch(
                   () => null

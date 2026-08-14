@@ -27,6 +27,10 @@ import type { Session, Message, TraceStep, ServerEvent, ContentBlock } from '../
 import { v4 as uuidv4 } from 'uuid';
 import { decidePermission, rememberAlwaysAllow } from '../config/permission-rules-store';
 import { PathResolver } from '../sandbox/path-resolver';
+import {
+  isLikelyConfirmationFollowUp,
+  findRecentSubstantiveUserPrompt,
+} from './office-doc-followup';
 import { MCPManager } from '../mcp/mcp-manager';
 import { mcpConfigStore } from '../mcp/mcp-config-store';
 import {
@@ -572,6 +576,11 @@ export class CoworkAgentRunner {
   private extensionManager?: AgentRuntimeExtensionManager;
   private activeControllers: Map<string, AbortController> = new Map();
   private piSessions: Map<string, CachedPiSession> = new Map();
+  // Session-scoped, not per-turn: a fresh LoopGuard per prompt() call would reset all
+  // counters to zero on every user message, which is exactly why a runaway loop
+  // reappeared immediately after the user manually retried. One guard persists for the
+  // whole session and accumulates across turns; cleared in clearSdkSession() below.
+  private loopGuards: Map<string, LoopGuard> = new Map();
   private toolDisplayNameCache: Map<string, string> = new Map();
   private static readonly MAX_CACHED_SESSIONS = 50;
 
@@ -717,19 +726,24 @@ export class CoworkAgentRunner {
   private async tryDirectOfficeToolCall(
     session: Session,
     prompt: string,
-    thinkingStepId: string
+    thinkingStepId: string,
+    existingMessages: Message[]
   ): Promise<boolean> {
     if (!this.mcpManager) return false;
     const toolName = this.detectOfficeDocIntent(prompt);
     if (!toolName) return false;
 
-    // Only intercept when the prompt is primarily a creation request (not research/analysis)
+    // Only intercept when the prompt is primarily a creation request (not research/analysis).
+    // The confirmation-phrase branch (give me/go ahead/yes/...) is safe to include unconditionally
+    // here because it's already gated behind detectOfficeDocIntent finding an explicit doc-type
+    // keyword in THIS prompt — a bare "please explain X" never reaches this point.
     const lower = prompt.toLowerCase();
     const isCreation =
       /\b(create|make|generate|build|produce|write|prepare|draft)\b/.test(lower) ||
       /\b(sample|template|format|invoice|report|spreadsheet|tracker|budget|proposal|agenda|deck|wbs|work breakdown|project plan|tasks?|subtasks?)\b/.test(
         lower
-      );
+      ) ||
+      /\b(give me|send me|go ahead|do it|proceed|yes please|sure)\b/.test(lower);
     if (!isCreation) return false;
 
     log(
@@ -748,8 +762,21 @@ export class CoworkAgentRunner {
         timestamp: Date.now(),
       });
 
-      // Auto-derive a filename from the prompt
-      const slug = prompt
+      // If this turn is just a bare confirmation ("give me excel sheet", "yes go ahead"),
+      // it carries no content of its own — pull the real request from the most recent
+      // substantive USER turn instead. This is what keeps the filename/content grounded in
+      // "school fees collection" rather than accidentally picking up the assistant's own
+      // prior reply (assistant turns are never eligible here, see findRecentSubstantiveUserPrompt).
+      let effectivePrompt = prompt;
+      if (isLikelyConfirmationFollowUp(prompt)) {
+        const priorPrompt = findRecentSubstantiveUserPrompt(existingMessages, prompt);
+        if (priorPrompt) {
+          effectivePrompt = priorPrompt;
+        }
+      }
+
+      // Auto-derive a filename from the effective (content-bearing) prompt
+      const slug = effectivePrompt
         .toLowerCase()
         .replace(/[^a-z0-9\s]/g, '')
         .trim()
@@ -758,7 +785,7 @@ export class CoworkAgentRunner {
         .join('_');
 
       // If the prompt references a local file, read it and inject its content
-      let description = prompt;
+      let description = effectivePrompt;
       let sourceFile: string | undefined;
       const referencedFilePaths = this.extractReferencedFilePaths(prompt, session.cwd);
       if (referencedFilePaths.length > 0) {
@@ -796,7 +823,7 @@ export class CoworkAgentRunner {
             timestamp: Date.now(),
           });
           description =
-            `User request: ${prompt}\n\n` +
+            `User request: ${effectivePrompt}\n\n` +
             `=== CONTENT FROM ATTACHED FILE: ${path.basename(filePath)} ===\n${fileContent}`;
           break;
         }
@@ -865,6 +892,7 @@ export class CoworkAgentRunner {
         logWarn('[CoworkAgentRunner] dispose error:', e);
       }
       this.piSessions.delete(sessionId);
+      this.loopGuards.delete(sessionId);
       log('[CoworkAgentRunner] Disposed pi session for:', sessionId);
     }
   }
@@ -1864,7 +1892,8 @@ ${hints.join('\n')}
       const earlyOfficeHandled = await this.tryDirectOfficeToolCall(
         session,
         prompt,
-        thinkingStepId
+        thinkingStepId,
+        existingMessages
       );
       if (earlyOfficeHandled) return;
 
@@ -2397,7 +2426,7 @@ This is an isolated sandbox environment. Use ${VIRTUAL_WORKSPACE_PATH} as the ro
 </your_configuration>`;
 
       const coworkAppendPrompt = [
-        'You are dsr-CoworkAI, an AI assistant by DSR AI Lab. Be concise, accurate, and tool-capable. Always deliver direct output — never suggest scripts or workarounds when a tool can produce the result immediately.',
+        'You are V-Coworker, an AI assistant by DSR AI Lab. Be concise, accurate, and tool-capable. Always deliver direct output — never suggest scripts or workarounds when a tool can produce the result immediately.',
         `CRITICAL BEHAVIORAL RULES:
 1. DIRECT OUTPUT ALWAYS: When the user asks you to create a file, document, spreadsheet, presentation, image, or any artifact — produce it immediately using the appropriate MCP tool. Do NOT suggest Python scripts, shell commands, or workarounds. Do NOT ask "Would you like me to...". Just call the tool and deliver the file.
 2. CHAT FIRST for non-actionable requests: Do NOT create, write, or edit files unless the user explicitly asks. For questions, summaries, explanations, and general conversation — reply directly in chat text.
@@ -2427,6 +2456,21 @@ When the user attaches or references a local file (e.g. "PFA", "based on the att
   4. Create the output document immediately.
 
 CHROME/BROWSER: Only use Chrome MCP tools (mcp__Chrome__*) when user explicitly asks to browse a URL or use the browser.
+  Sequencing rules (follow strictly to avoid loops):
+  1. Call list_pages FIRST, before new_page or navigate_page. The browser is a long-lived
+     process shared across sessions — it may already have open tabs, including tabs from
+     unrelated earlier tasks. Do not assume no pages exist.
+  2. If list_pages shows a page already relevant to the CURRENT task (e.g. same site, same
+     purpose), reuse it via select_page/navigate_page. Do NOT open a new tab for a task that
+     can continue in an existing one.
+  3. Ignore tabs unrelated to the current task even if list_pages returns them — never switch
+     topics (e.g. price lookups, unrelated news) because an unrelated tab happens to be open.
+  4. Call new_page AT MOST ONCE per task, unless the user explicitly asks for another tab.
+  5. If navigate_page fails with "No page selected," do NOT call new_page again. Call
+     list_pages, then select_page on an existing page, or create exactly one new page if none
+     exist — never retry new_page speculatively.
+  6. If the same action fails twice in a row, stop and explain the blocker to the user in text
+     instead of retrying with slightly different arguments.
 WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the web. File tasks and document creation tasks are LOCAL — never web-triggered.
 </tool_behavior>`,
         this.getBundledPathHints(),
@@ -2631,6 +2675,7 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
               }
             }
             this.piSessions.delete(oldestKey);
+            this.loopGuards.delete(oldestKey);
             log('[CoworkAgentRunner] Evicted oldest cached session:', oldestKey);
           }
         }
@@ -2666,7 +2711,14 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
                 ? await originalOnPayload.call(agent, payload, modelArg)
                 : payload;
               if (result === undefined) result = payload;
-              return { ...result, num_ctx: ollamaNumCtx.value };
+              const finalPayload = { ...result, num_ctx: ollamaNumCtx.value };
+              if (process.env.COWORK_LOG_SDK_MESSAGES_FULL === '1') {
+                log(
+                  '[CoworkAgentRunner] Ollama outgoing request payload:',
+                  safeStringify(finalPayload, 2)
+                );
+              }
+              return finalPayload;
             };
             this.piSessions.get(session.id)!.ollamaNumCtx = ollamaNumCtx;
             log(
@@ -2692,14 +2744,25 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
       // ── Loop guard: protect against runaway tool-call loops ──
       // (e.g. gemini-3.1-pro with thinking=off has been observed producing hundreds
       //  of empty-text + single-tool-call responses in a single turn)
-      // Two layers: hash of whole tool-call group (window=20, warn=3/halt=5/abort=8)
-      //             + per-tool frequency (warn=30/halt=50/abort=80).
-      const loopGuard = new LoopGuard();
+      // Three layers: hash of whole tool-call group (window=20, warn=3/halt=5/abort=8)
+      //             + tool-name-only consecutive streak, ignoring args (warn=4/halt=7/abort=12)
+      //             + per-tool cumulative frequency (warn=30/halt=50/abort=80).
+      // Session-scoped (not per-turn): reused across every prompt() call for this session so
+      // a user manually retrying after a loop doesn't hand the model a fresh set of counters.
+      let loopGuard = this.loopGuards.get(session.id);
+      if (!loopGuard) {
+        loopGuard = new LoopGuard();
+        this.loopGuards.set(session.id, loopGuard);
+      }
       const handleLoopGuardDecision = (decision: LoopGuardDecision, context: string): void => {
         if (decision.action === 'none' || controller.signal.aborted) return;
         logWarn(`[LoopGuard] ${context}: action=${decision.action} reason=${decision.reason}`);
 
-        if (decision.action === 'hash_abort' || decision.action === 'freq_abort') {
+        if (
+          decision.action === 'hash_abort' ||
+          decision.action === 'freq_abort' ||
+          decision.action === 'name_abort'
+        ) {
           // Always surface the loop-guard explanation, even if an earlier
           // error already set hasEmittedError — the user must see why the
           // session stopped. Mark the flag afterward to suppress duplicate
@@ -2729,7 +2792,9 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
         }
 
         const steerText =
-          decision.action === 'hash_halt' || decision.action === 'freq_halt'
+          decision.action === 'hash_halt' ||
+          decision.action === 'freq_halt' ||
+          decision.action === 'name_halt'
             ? buildHaltSteerMessage(decision)
             : buildWarnSteerMessage(decision);
         // fire-and-forget: SDK queues the steering message for the next turn

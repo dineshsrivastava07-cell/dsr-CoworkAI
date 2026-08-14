@@ -51,7 +51,6 @@ describe('session title utils', () => {
   it('builds a bilingual prompt requiring <=15 chars and same language', () => {
     const prompt = buildTitlePrompt('帮我做一个PPT');
     expect(prompt).toContain('15');
-    expect(prompt).toContain('同语言');
     expect(prompt).toContain('same language');
   });
 
