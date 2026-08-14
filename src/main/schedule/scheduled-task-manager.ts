@@ -11,14 +11,54 @@
  *
  * Dependencies: session-manager, database
  */
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { createHash } from 'crypto';
 import {
   buildScheduledTaskFallbackTitle,
   buildScheduledTaskTitle,
 } from '../../shared/schedule/task-title';
 import { log, logError } from '../utils/logger';
 
+const execFileAsync = promisify(execFile);
+
 export type ScheduleRepeatUnit = 'minute' | 'hour' | 'day';
 export type ScheduledTaskWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+// ──────────────── Reactive scheduling (watch tasks) ──────────────────────────────
+// A watch task polls a condition (HTTP response / shell command output) on
+// `pollIntervalMs` and only starts a real agent session when the condition's
+// state actually changes, instead of firing unconditionally on a clock.
+
+export type WatchCheckType = 'http' | 'command';
+
+export interface WatchHttpCheckConfig {
+  url: string;
+  method?: 'GET' | 'HEAD';
+}
+
+export interface WatchCommandCheckConfig {
+  command: string;
+  args?: string[];
+}
+
+export interface WatchConfig {
+  checkType: WatchCheckType;
+  http?: WatchHttpCheckConfig;
+  command?: WatchCommandCheckConfig;
+  /** How often to re-check when unchanged. Floored at MIN_POLL_INTERVAL_MS to prevent abuse. */
+  pollIntervalMs: number;
+}
+
+export interface CheckConditionResult {
+  changed: boolean;
+  /** Opaque serialized state used to diff against the next check. */
+  state: string;
+}
+
+export type CheckConditionFn = (task: ScheduledTask) => Promise<CheckConditionResult>;
+
+const MIN_POLL_INTERVAL_MS = 60_000;
 
 export interface ScheduledTaskDailyScheduleConfig {
   kind: 'daily';
@@ -46,6 +86,9 @@ export interface ScheduledTask {
   repeatEvery: number | null;
   repeatUnit: ScheduleRepeatUnit | null;
   enabled: boolean;
+  watchConfig: WatchConfig | null;
+  lastCheckedState: string | null;
+  lastCheckedAt: number | null;
   lastRunAt: number | null;
   lastRunSessionId: string | null;
   lastError: string | null;
@@ -63,6 +106,7 @@ export interface ScheduledTaskCreateInput {
   repeatEvery?: number | null;
   repeatUnit?: ScheduleRepeatUnit | null;
   enabled?: boolean;
+  watchConfig?: WatchConfig | null;
 }
 
 export interface ScheduledTaskUpdateInput {
@@ -75,6 +119,9 @@ export interface ScheduledTaskUpdateInput {
   repeatEvery?: number | null;
   repeatUnit?: ScheduleRepeatUnit | null;
   enabled?: boolean;
+  watchConfig?: WatchConfig | null;
+  lastCheckedState?: string | null;
+  lastCheckedAt?: number | null;
   lastRunAt?: number | null;
   lastRunSessionId?: string | null;
   lastError?: string | null;
@@ -105,6 +152,8 @@ interface ScheduledTaskManagerOptions {
   executeTask: (task: ScheduledTask) => Promise<ScheduledTaskRunResult>;
   onTaskError?: (taskId: string, error: string) => void;
   now?: () => number;
+  /** Injectable for tests; defaults to defaultCheckCondition (real HTTP/command checks). */
+  checkCondition?: CheckConditionFn;
 }
 
 export class ScheduledTaskManager {
@@ -112,6 +161,7 @@ export class ScheduledTaskManager {
   private readonly executeTask: (task: ScheduledTask) => Promise<ScheduledTaskRunResult>;
   private readonly onTaskError?: (taskId: string, error: string) => void;
   private readonly now: () => number;
+  private readonly checkCondition: CheckConditionFn;
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly executingTasks = new Set<string>();
   private running = false;
@@ -121,6 +171,7 @@ export class ScheduledTaskManager {
     this.executeTask = options.executeTask;
     this.onTaskError = options.onTaskError;
     this.now = options.now ?? (() => Date.now());
+    this.checkCondition = options.checkCondition ?? defaultCheckCondition;
   }
 
   start(): void {
@@ -164,11 +215,13 @@ export class ScheduledTaskManager {
       ? buildScheduledTaskTitle(input.title)
       : buildScheduledTaskFallbackTitle(normalizedPrompt);
     const normalizedScheduleConfig = normalizeScheduleConfig(input.scheduleConfig);
-    const normalizedRepeatEvery = normalizedScheduleConfig
+    const normalizedWatchConfig = normalizeWatchConfig(input.watchConfig);
+    const usesCustomTrigger = Boolean(normalizedScheduleConfig || normalizedWatchConfig);
+    const normalizedRepeatEvery = usesCustomTrigger
       ? null
       : normalizeRepeatEvery(input.repeatEvery);
     const normalizedRepeatUnit =
-      normalizedScheduleConfig || normalizedRepeatEvery === null
+      usesCustomTrigger || normalizedRepeatEvery === null
         ? null
         : normalizeRepeatUnit(input.repeatUnit);
     const created = this.store.create({
@@ -176,6 +229,7 @@ export class ScheduledTaskManager {
       title: normalizedTitle,
       prompt: normalizedPrompt,
       scheduleConfig: normalizedScheduleConfig,
+      watchConfig: normalizedWatchConfig,
       nextRunAt: input.nextRunAt ?? input.runAt,
       enabled: input.enabled ?? true,
       repeatEvery: normalizedRepeatEvery,
@@ -197,21 +251,26 @@ export class ScheduledTaskManager {
       updates.scheduleConfig === undefined
         ? undefined
         : normalizeScheduleConfig(updates.scheduleConfig);
+    const nextWatchConfig =
+      updates.watchConfig === undefined ? undefined : normalizeWatchConfig(updates.watchConfig);
     const usesScheduleConfig =
       nextScheduleConfig !== undefined
         ? nextScheduleConfig !== null
         : current.scheduleConfig !== null;
-    const nextRepeatEvery = usesScheduleConfig
+    const usesWatchConfig =
+      nextWatchConfig !== undefined ? nextWatchConfig !== null : current.watchConfig !== null;
+    const usesCustomTrigger = usesScheduleConfig || usesWatchConfig;
+    const nextRepeatEvery = usesCustomTrigger
       ? null
       : updates.repeatEvery === undefined
         ? undefined
         : normalizeRepeatEvery(updates.repeatEvery);
-    let nextRepeatUnit = usesScheduleConfig
+    let nextRepeatUnit = usesCustomTrigger
       ? null
       : updates.repeatUnit === undefined
         ? undefined
         : normalizeRepeatUnit(updates.repeatUnit);
-    if (!usesScheduleConfig && nextRepeatEvery !== undefined && nextRepeatEvery === null) {
+    if (!usesCustomTrigger && nextRepeatEvery !== undefined && nextRepeatEvery === null) {
       nextRepeatUnit = null;
     }
     const updated = this.store.update(id, {
@@ -219,6 +278,7 @@ export class ScheduledTaskManager {
       prompt: nextPrompt,
       title: nextTitle,
       scheduleConfig: nextScheduleConfig,
+      watchConfig: nextWatchConfig,
       repeatEvery: nextRepeatEvery,
       repeatUnit: nextRepeatUnit,
     });
@@ -295,6 +355,15 @@ export class ScheduledTaskManager {
     if (this.executingTasks.has(taskId)) {
       return;
     }
+
+    if (task.watchConfig) {
+      this.executingTasks.add(taskId);
+      this.runWatchCheck(task).finally(() => {
+        this.executingTasks.delete(taskId);
+      });
+      return;
+    }
+
     this.executingTasks.add(taskId);
     const taskToExecute = this.prepareExecution(task);
     this.executeAndRecord(taskToExecute)
@@ -318,6 +387,65 @@ export class ScheduledTaskManager {
       .finally(() => {
         this.executingTasks.delete(taskId);
       });
+  }
+
+  /**
+   * Check-then-act pipeline for watch tasks: evaluate the condition first,
+   * and only start a real agent session (via the normal executeAndRecord
+   * path) when the observed state actually changed. Always reschedules the
+   * next check at pollIntervalMs regardless of outcome — watch tasks never
+   * self-disable the way one-time tasks do.
+   */
+  private async runWatchCheck(task: ScheduledTask): Promise<void> {
+    const watchConfig = task.watchConfig;
+    if (!watchConfig) return;
+    const nextCheckAt = this.now() + watchConfig.pollIntervalMs;
+
+    let result: CheckConditionResult;
+    try {
+      result = await this.checkCondition(task);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const updated = this.store.update(task.id, {
+        nextRunAt: nextCheckAt,
+        lastCheckedAt: this.now(),
+        lastError: message,
+      });
+      if (updated) this.scheduleTask(updated);
+      this.onTaskError?.(task.id, message);
+      logError(`[ScheduledTask] Watch check failed for task ${task.id}:`, error);
+      return;
+    }
+
+    const afterCheck = this.store.update(task.id, {
+      nextRunAt: nextCheckAt,
+      lastCheckedAt: this.now(),
+      lastCheckedState: result.state,
+      lastError: null,
+    });
+    if (!afterCheck) return;
+
+    if (!result.changed) {
+      this.scheduleTask(afterCheck);
+      return;
+    }
+
+    // Condition changed — fire the underlying task through the normal execution
+    // path (records lastRunAt/lastRunSessionId/lastError), then re-arm the timer
+    // using the nextRunAt we already set above.
+    try {
+      const execution = await this.executeAndRecord(afterCheck);
+      if (!execution.success) {
+        this.onTaskError?.(task.id, execution.error ?? 'Watch task execution failed');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.onTaskError?.(task.id, message);
+      logError(`[ScheduledTask] Unhandled error executing watch task ${task.id}:`, error);
+    } finally {
+      const finalTask = this.store.get(task.id);
+      if (finalTask) this.scheduleTask(finalTask);
+    }
   }
 
   private prepareExecution(task: ScheduledTask): ScheduledTask {
@@ -441,10 +569,17 @@ function normalizeScheduleConfig(
 }
 
 function isRepeatingTask(task: ScheduledTask): boolean {
-  return task.scheduleConfig !== null || Boolean(task.repeatEvery && task.repeatUnit);
+  return (
+    task.watchConfig !== null ||
+    task.scheduleConfig !== null ||
+    Boolean(task.repeatEvery && task.repeatUnit)
+  );
 }
 
 function computeNextRunAt(task: ScheduledTask, now: number): number | null {
+  if (task.watchConfig) {
+    return now + task.watchConfig.pollIntervalMs;
+  }
   if (task.scheduleConfig) {
     return computeNextRunAtFromScheduleConfig(task.scheduleConfig, now);
   }
@@ -455,6 +590,83 @@ function computeNextRunAt(task: ScheduledTask, now: number): number | null {
   if (nextBase > now) return nextBase;
   const skippedIntervals = Math.floor((now - nextBase) / intervalMs) + 1;
   return nextBase + skippedIntervals * intervalMs;
+}
+
+function normalizeWatchConfig(value: WatchConfig | null | undefined): WatchConfig | null {
+  if (!value) {
+    return null;
+  }
+  const pollIntervalMs = Number.isFinite(value.pollIntervalMs)
+    ? Math.max(MIN_POLL_INTERVAL_MS, Math.floor(value.pollIntervalMs))
+    : MIN_POLL_INTERVAL_MS;
+
+  if (value.checkType === 'http') {
+    const url = value.http?.url?.trim();
+    if (!url) return null;
+    return {
+      checkType: 'http',
+      http: { url, method: value.http?.method === 'HEAD' ? 'HEAD' : 'GET' },
+      pollIntervalMs,
+    };
+  }
+  if (value.checkType === 'command') {
+    const command = value.command?.command?.trim();
+    if (!command) return null;
+    return {
+      checkType: 'command',
+      command: {
+        command,
+        args: Array.isArray(value.command?.args) ? value.command.args.filter(Boolean) : [],
+      },
+      pollIntervalMs,
+    };
+  }
+  return null;
+}
+
+/**
+ * Default (real) condition checker: HTTP status+body hash, or shell command
+ * exit-code+stdout hash. First-ever check for a task (lastCheckedState is
+ * null) always reports changed:false — it only establishes a baseline, so
+ * creating a watch task doesn't immediately fire it.
+ */
+export async function defaultCheckCondition(task: ScheduledTask): Promise<CheckConditionResult> {
+  const watchConfig = task.watchConfig;
+  if (!watchConfig) {
+    throw new Error(`Task ${task.id} has no watchConfig`);
+  }
+  const state =
+    watchConfig.checkType === 'http'
+      ? await computeHttpCheckState(watchConfig.http!)
+      : await computeCommandCheckState(watchConfig.command!);
+  const changed = task.lastCheckedState !== null && task.lastCheckedState !== state;
+  return { changed, state };
+}
+
+async function computeHttpCheckState(config: WatchHttpCheckConfig): Promise<string> {
+  const response = await fetch(config.url, {
+    method: config.method ?? 'GET',
+    signal: AbortSignal.timeout(15000),
+  });
+  const body = await response.text();
+  const hash = createHash('sha256').update(body).digest('hex');
+  return `status:${response.status}|hash:${hash}`;
+}
+
+async function computeCommandCheckState(config: WatchCommandCheckConfig): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(config.command, config.args ?? [], { timeout: 30000 });
+    const hash = createHash('sha256')
+      .update(typeof stdout === 'string' ? stdout : '')
+      .digest('hex');
+    return `exit:0|hash:${hash}`;
+  } catch (error) {
+    const err = error as { code?: number | string; stdout?: string };
+    const hash = createHash('sha256')
+      .update(typeof err.stdout === 'string' ? err.stdout : '')
+      .digest('hex');
+    return `exit:${err.code ?? 'unknown'}|hash:${hash}`;
+  }
 }
 
 function getIntervalMs(

@@ -132,6 +132,26 @@ export interface WeeklyScheduleConfig {
 
 export type ScheduleConfig = DailyScheduleConfig | WeeklyScheduleConfig;
 
+// Reactive scheduling (watch tasks): poll a condition and only fire when it changes.
+export type WatchCheckType = 'http' | 'command';
+
+export interface WatchHttpCheckConfig {
+  url: string;
+  method?: 'GET' | 'HEAD';
+}
+
+export interface WatchCommandCheckConfig {
+  command: string;
+  args?: string[];
+}
+
+export interface WatchConfig {
+  checkType: WatchCheckType;
+  http?: WatchHttpCheckConfig;
+  command?: WatchCommandCheckConfig;
+  pollIntervalMs: number;
+}
+
 export interface ScheduleTask {
   id: string;
   title: string;
@@ -143,7 +163,11 @@ export interface ScheduleTask {
   repeatEvery: number | null;
   repeatUnit: ScheduleRepeatUnit | null;
   enabled: boolean;
+  watchConfig: WatchConfig | null;
+  lastCheckedState: string | null;
+  lastCheckedAt: number | null;
   lastRunAt: number | null;
+  lastRunSessionAt: string | null;
   lastRunSessionId: string | null;
   lastError: string | null;
   createdAt: number;
@@ -160,6 +184,7 @@ export interface ScheduleCreateInput {
   repeatEvery?: number | null;
   repeatUnit?: ScheduleRepeatUnit | null;
   enabled?: boolean;
+  watchConfig?: WatchConfig | null;
 }
 
 export interface ScheduleUpdateInput {
@@ -172,6 +197,9 @@ export interface ScheduleUpdateInput {
   repeatEvery?: number | null;
   repeatUnit?: ScheduleRepeatUnit | null;
   enabled?: boolean;
+  watchConfig?: WatchConfig | null;
+  lastCheckedState?: string | null;
+  lastCheckedAt?: number | null;
   lastRunAt?: number | null;
   lastRunSessionId?: string | null;
   lastError?: string | null;
