@@ -1,4 +1,4 @@
-# dsr-CoworkAI — Architecture
+# V-Coworker — Architecture
 
 > **Developed by DSR AI Lab**
 
@@ -6,7 +6,7 @@
 
 ## System Overview
 
-dsr-CoworkAI is a local-shell AI agent desktop application built on Electron + React. All LLM inference runs on-device via **Ollama + Gemma**. Authentication uses **Gemini OAuth** (Google). The architecture is organized into three primary layers: the Electron main process (Node.js), the React renderer (UI), and the local AI infrastructure.
+V-Coworker is a local-shell AI agent desktop application built on Electron + React. All LLM inference runs on-device via **Ollama + Gemma**. Authentication uses **Gemini OAuth** (Google). The architecture is organized into three primary layers: the Electron main process (Node.js), the React renderer (UI), and the local AI infrastructure.
 
 ---
 
@@ -70,7 +70,7 @@ graph TB
 ```mermaid
 sequenceDiagram
     actor User
-    participant App as dsr-CoworkAI
+    participant App as V-Coworker
     participant OS as macOS Keychain
     participant Google as Google OAuth 2.0
     participant Gemini as Gemini API
@@ -300,5 +300,5 @@ scripts/
 
 ---
 
-_dsr-CoworkAI — Developed by DSR AI Lab_
+_V-Coworker — Developed by DSR AI Lab_
 _github.com/dineshsrivastava07-cell/dsr-CoworkAI_

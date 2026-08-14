@@ -1,15 +1,15 @@
-# dsr-CoworkAI
+# V-Coworker
 
 > **Local-first AI Agent Desktop App** — powered by Ollama + Gemma, with Gemini OAuth sign-in.
 > Developed by **D1SR AI Lab**
 
 ---
 
-## What is dsr-CoworkAI?
+## What is V-Coworker?
 
-**dsr-CoworkAI** is an open-source, privacy-first AI agent desktop application for macOS and Windows. It runs your AI workloads entirely on your local machine using [Ollama](https://ollama.com) and [Gemma](https://ai.google.dev/gemma) models — no cloud API keys required for inference. Sign in securely with your Google/Gemini account via OAuth.
+**V-Coworker** is an open-source, privacy-first AI agent desktop application for macOS and Windows. It runs your AI workloads entirely on your local machine using [Ollama](https://ollama.com) and [Gemma](https://ai.google.dev/gemma) models — no cloud API keys required for inference. Sign in securely with your Google/Gemini account via OAuth.
 
-Built on top of the Electron + React stack, dsr-CoworkAI gives you:
+Built on top of the Electron + React stack, V-Coworker gives you:
 
 - One-click MCP (Model Context Protocol) tool integration
 - Skill protocols — reusable AI workflows
@@ -73,7 +73,7 @@ npm run build:win
 
 ## Configuration
 
-On first launch, dsr-CoworkAI defaults to **Ollama** with **gemma4:27b**. No configuration needed if Ollama is running at `http://localhost:11434`.
+On first launch, V-Coworker defaults to **Ollama** with **gemma4:27b**. No configuration needed if Ollama is running at `http://localhost:11434`.
 
 ### Gemini OAuth Sign-In
 
@@ -127,7 +127,7 @@ MIT — see [LICENSE](./LICENSE)
 
 ## Office Document Generation
 
-dsr-CoworkAI can create fully formatted office documents on demand via the built-in **Office Tools MCP server**:
+V-Coworker can create fully formatted office documents on demand via the built-in **Office Tools MCP server**:
 
 | Command example                               | Output                                                         |
 | --------------------------------------------- | -------------------------------------------------------------- |

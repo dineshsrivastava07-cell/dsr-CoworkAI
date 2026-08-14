@@ -1,6 +1,6 @@
-# Contributing to dsr-CoworkAI
+# Contributing to V-Coworker
 
-Thank you for your interest in contributing! dsr-CoworkAI is an open-source desktop AI agent app built with Electron, React, and TypeScript. This guide covers everything you need to get started.
+Thank you for your interest in contributing! V-Coworker is an open-source desktop AI agent app built with Electron, React, and TypeScript. This guide covers everything you need to get started.
 
 ---
 
@@ -46,7 +46,7 @@ src/
 │   ├── db/                  # SQLite schema and migrations
 │   ├── sandbox/             # Lima (macOS) / WSL2 (Windows) isolation
 │   ├── skills/              # Skill discovery and hot-reload
-│   ├── remote/              # Feishu/Lark bot integration
+│   ├── remote/              # Remote desktop and collaboration gateway
 │   └── schedule/            # Cron-like scheduled tasks
 └── renderer/                # React frontend
     ├── components/          # UI components
@@ -117,7 +117,7 @@ Scope is optional but encouraged.
 
 ## Dependency Management
 
-dsr-CoworkAI uses **Dependabot** (`.github/dependabot.yml`) to keep dependencies current. To avoid PR pile-up and reduce risk, we follow a tiered strategy:
+V-Coworker uses **Dependabot** (`.github/dependabot.yml`) to keep dependencies current. To avoid PR pile-up and reduce risk, we follow a tiered strategy:
 
 ### Tiers
 
@@ -159,7 +159,7 @@ Before adding a dependency:
 
 ## Testing
 
-dsr-CoworkAI uses **Vitest**.
+V-Coworker uses **Vitest**.
 
 **File placement**
 
@@ -206,7 +206,7 @@ Translation files live in `src/renderer/i18n/`. Add keys to both `en` and `zh` l
 
 **Bug reports** — use the GitHub issue template and include:
 
-- dsr-CoworkAI version
+- V-Coworker version
 - Operating system (macOS / Windows + version)
 - Steps to reproduce
 - Expected vs. actual behavior

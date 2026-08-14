@@ -60,7 +60,7 @@ import type {
 } from '../renderer/types';
 import { remoteManager, type AgentExecutor } from './remote/remote-manager';
 import { remoteConfigStore } from './remote/remote-config-store';
-import type { GatewayConfig, FeishuChannelConfig, ChannelType } from './remote/types';
+import type { GatewayConfig, ChannelType } from './remote/types';
 import { startNavServer, stopNavServer } from './nav-server';
 import {
   ScheduledTaskManager,
@@ -382,7 +382,7 @@ function setupTray() {
   }
 
   tray = new Tray(resolvedIconPath);
-  tray.setToolTip('dsr-CoworkAI');
+  tray.setToolTip('V-Coworker');
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -1291,10 +1291,10 @@ app
     startConfigFileWatcher();
 
     // Log environment variables for debugging
-    log('=== dsr-CoworkAI Starting ===');
+    log('=== V-Coworker Starting ===');
     log('Config file:', configStore.getPath());
     log('Is configured:', configStore.isConfigured());
-    log('[Runtime] Using dsr-CoworkAI agent SDK — Ollama/Gemma local executor');
+    log('[Runtime] Using V-Coworker agent SDK — Ollama/Gemma local executor');
     log('Developer logs:', enableDevLogs ? 'Enabled' : 'Disabled');
     log('Environment Variables:');
     log('  ANTHROPIC_AUTH_TOKEN:', process.env.ANTHROPIC_AUTH_TOKEN ? '✓ Set' : '✗ Not set');
@@ -1498,7 +1498,10 @@ app
   .catch((error) => {
     logError('[App] Startup failed:', error);
     const message = error instanceof Error ? error.message : 'Unknown startup error';
-    dialog.showErrorBox('dsr-CoworkAI Startup Failed', `${message}\n\nPlease check the logs for more information.`);
+    dialog.showErrorBox(
+      'V-Coworker Startup Failed',
+      `${message}\n\nPlease check the logs for more information.`
+    );
     app.quit();
   });
 
@@ -2714,7 +2717,7 @@ ipcMain.handle('logs.export', async () => {
       });
       archive.append(
         [
-          'dsr-CoworkAI diagnostic bundle',
+          'V-Coworker diagnostic bundle',
           `Exported at: ${diagnosticsSummary.exportedAt}`,
           '',
           'Included files:',
@@ -2844,16 +2847,6 @@ ipcMain.handle('remote.updateGatewayConfig', async (_event, config: Partial<Gate
   }
 });
 
-ipcMain.handle('remote.updateFeishuConfig', async (_event, config: FeishuChannelConfig) => {
-  try {
-    await remoteManager.updateFeishuConfig(config);
-    return { success: true };
-  } catch (error) {
-    logError('[Remote] Error updating Feishu config:', error);
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
-  }
-});
-
 ipcMain.handle('remote.getPairedUsers', () => {
   try {
     return remoteManager.getPairedUsers();
@@ -2932,7 +2925,7 @@ ipcMain.handle('remote.getTunnelStatus', () => {
 
 ipcMain.handle('remote.getWebhookUrl', () => {
   try {
-    return remoteManager.getFeishuWebhookUrl();
+    return remoteManager.getWebhookUrl();
   } catch (error) {
     logError('[Remote] Error getting webhook URL:', error);
     return null;
@@ -3199,7 +3192,8 @@ async function handleClientEvent(event: ClientEvent): Promise<unknown> {
     sendToRenderer({
       type: 'error',
       payload: {
-        message: '当前方案未配置可用凭证，请先在 API 设置中完成配置',
+        message:
+          'The current config set has no usable credentials. Please finish setup in API Settings first.',
         code: 'CONFIG_REQUIRED_ACTIVE_SET',
         action: 'open_api_settings',
       },

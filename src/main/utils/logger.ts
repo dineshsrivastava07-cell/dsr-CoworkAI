@@ -135,7 +135,7 @@ function initLogFile(): void {
     // Write header
     const header = `
 ================================================================================
-dsr-CoworkAI Application Log
+V-Coworker Application Log
 Started: ${new Date().toISOString()}
 Platform: ${process.platform}
 Arch: ${process.arch}

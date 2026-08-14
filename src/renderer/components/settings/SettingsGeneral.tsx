@@ -71,9 +71,7 @@ export function SettingsGeneral() {
       {/* About */}
       {appVer && (
         <div className="pt-4 border-t border-border">
-          <p className="text-xs text-text-muted">
-            dsr-CoworkAI v{appVer} · Developed by DSR AI Lab
-          </p>
+          <p className="text-xs text-text-muted">V-Coworker v{appVer} · Developed by DSR AI Lab</p>
         </div>
       )}
     </div>
