@@ -16,8 +16,11 @@ import { MessageCard } from './MessageCard';
 import { SubagentTracker } from './SubagentTracker';
 import { ContextUsageBar } from './ContextUsageBar';
 import type { Message, ContentBlock } from '../types';
-import { Send, Square, Plus, Loader2, Plug, X, Clock } from 'lucide-react';
+import { Send, Square, Plus, Loader2, Plug, X, Clock, MousePointer2 } from 'lucide-react';
 import { isScrollNearBottom, resolveSessionScrollTop } from '../utils/chat-scroll-position';
+import { isGuiOperateControlAction } from './message/toolHelpers';
+
+const GUI_OPERATE_INDICATOR_WINDOW_MS = 4000;
 
 type AttachedFile = {
   name: string;
@@ -135,6 +138,39 @@ export function ChatView() {
       ? 0
       : Math.max(0, (executionClock.endAt ?? clockNow) - executionClock.startAt);
   const timerActive = Boolean(executionClock?.startAt && executionClock.endAt === null);
+
+  // --- "Controlling desktop" indicator: pill shown while a gui-operate action
+  // (click/drag/type/etc.) is in flight or was active within the last few seconds ---
+  const traceSteps = useAppStore((s) =>
+    activeSessionId ? (s.sessionStates[activeSessionId]?.traceSteps ?? []) : []
+  );
+  const latestGuiOperateStep = useMemo(() => {
+    for (let i = traceSteps.length - 1; i >= 0; i--) {
+      const step = traceSteps[i];
+      if (step.type === 'tool_call' && step.toolName && isGuiOperateControlAction(step.toolName)) {
+        return step;
+      }
+    }
+    return null;
+  }, [traceSteps]);
+
+  const [guiOperateNow, setGuiOperateNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!latestGuiOperateStep) return;
+    const isRunning = latestGuiOperateStep.status === 'running';
+    const withinWindow =
+      Date.now() - latestGuiOperateStep.timestamp < GUI_OPERATE_INDICATOR_WINDOW_MS;
+    if (!isRunning && !withinWindow) return;
+    setGuiOperateNow(Date.now());
+    const interval = setInterval(() => setGuiOperateNow(Date.now()), 500);
+    return () => clearInterval(interval);
+  }, [latestGuiOperateStep?.id, latestGuiOperateStep?.status, latestGuiOperateStep?.timestamp]);
+
+  const guiOperateActive = Boolean(
+    latestGuiOperateStep &&
+    (latestGuiOperateStep.status === 'running' ||
+      guiOperateNow - latestGuiOperateStep.timestamp < GUI_OPERATE_INDICATOR_WINDOW_MS)
+  );
 
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
@@ -689,7 +725,7 @@ export function ChatView() {
         className="relative h-12 border-b border-border-muted grid grid-cols-[1fr_auto_1fr] items-center px-4 lg:px-8 bg-background/88 backdrop-blur-md"
       >
         <div className="text-[11px] font-medium tracking-[0.08em] uppercase text-text-muted">
-          dsr-CoworkAI
+          V-Coworker
         </div>
         <h2
           ref={titleRef}
@@ -697,29 +733,41 @@ export function ChatView() {
         >
           {activeSession.title}
         </h2>
-        {activeConnectors.length > 0 && (
-          <>
-            <div
-              ref={connectorMeasureRef}
-              aria-hidden="true"
-              className="absolute left-0 top-0 -z-10 opacity-0 pointer-events-none"
-            >
-              <div className="flex items-center gap-2 px-2 py-1 rounded-lg border border-mcp/20">
-                <Plug className="w-3.5 h-3.5" />
-                <span className="text-xs font-medium whitespace-nowrap">
-                  {t('chat.connectorCount', { count: activeConnectors.length })}
+        {(activeConnectors.length > 0 || guiOperateActive) && (
+          <div className="flex items-center gap-2 justify-self-end">
+            {guiOperateActive && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-warning/10 border border-warning/25">
+                <MousePointer2 className="w-3.5 h-3.5 text-warning animate-pulse" />
+                <span className="text-xs text-warning font-medium whitespace-nowrap">
+                  {t('chat.controllingDesktop', 'Controlling desktop')}
                 </span>
               </div>
-            </div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-mcp/8 border border-mcp/15 justify-self-end">
-              <Plug className="w-3.5 h-3.5 text-mcp" />
-              <span className="text-xs text-mcp font-medium">
-                {showConnectorLabel
-                  ? t('chat.connectorCount', { count: activeConnectors.length })
-                  : activeConnectors.length}
-              </span>
-            </div>
-          </>
+            )}
+            {activeConnectors.length > 0 && (
+              <>
+                <div
+                  ref={connectorMeasureRef}
+                  aria-hidden="true"
+                  className="absolute left-0 top-0 -z-10 opacity-0 pointer-events-none"
+                >
+                  <div className="flex items-center gap-2 px-2 py-1 rounded-lg border border-mcp/20">
+                    <Plug className="w-3.5 h-3.5" />
+                    <span className="text-xs font-medium whitespace-nowrap">
+                      {t('chat.connectorCount', { count: activeConnectors.length })}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-mcp/8 border border-mcp/15">
+                  <Plug className="w-3.5 h-3.5 text-mcp" />
+                  <span className="text-xs text-mcp font-medium">
+                    {showConnectorLabel
+                      ? t('chat.connectorCount', { count: activeConnectors.length })
+                      : activeConnectors.length}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
         )}
       </div>
 
@@ -735,7 +783,7 @@ export function ChatView() {
           {displayedMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-28 text-text-muted space-y-3 text-center">
               <p className="text-[11px] uppercase tracking-[0.16em] text-text-muted/80">
-                dsr-CoworkAI
+                V-Coworker
               </p>
               <p className="text-base text-text-secondary">{t('chat.startConversation')}</p>
             </div>
