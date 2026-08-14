@@ -25,6 +25,7 @@ import path from 'path';
 import { connectWithOAuthRetry, OpenCoworkMcpOAuthProvider } from './mcp-oauth';
 import { log, logError, logWarn, logCtx, logCtxError, logTiming } from '../utils/logger';
 import { getDefaultShell } from '../utils/shell-resolver';
+import type { ConfigStore } from '../config/config-store';
 
 const MCP_LIST_TOOLS_TIMEOUT_MS = 5 * 60 * 1000;
 const MCP_TOOL_CALL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -353,6 +354,38 @@ export class MCPManager {
       throw new Error('Bundled npx is unavailable.');
     }
     return this.npxPath;
+  }
+
+  /**
+   * Resolve the user's configured Ollama profile (config-store's dedicated
+   * 'ollama' provider profile, independent of whichever provider is active for
+   * chat) into env var overrides for built-in content-generation MCP servers.
+   * Falls back to empty (server uses its own localhost default) if unset or if
+   * config-store isn't ready yet.
+   *
+   * Loaded via dynamic import (not a static top-level import) so that merely
+   * importing mcp-manager.ts doesn't pull in electron-store — config-store.ts's
+   * transitive dependency — in contexts (like unit tests) that don't fully mock
+   * it. This keeps the Ollama-profile read fully optional/best-effort.
+   */
+  private async getOllamaEnvOverrides(): Promise<Record<string, string>> {
+    try {
+      const { configStore } = (await import('../config/config-store')) as {
+        configStore: ConfigStore;
+      };
+      const profile = configStore.getAll().profiles?.ollama;
+      const overrides: Record<string, string> = {};
+      if (profile?.baseUrl?.trim()) {
+        overrides.OLLAMA_BASE_URL = profile.baseUrl.trim();
+      }
+      if (profile?.apiKey?.trim()) {
+        overrides.OLLAMA_API_KEY = profile.apiKey.trim();
+      }
+      return overrides;
+    } catch (error) {
+      logWarn('[MCPManager] Could not read Ollama profile from config-store:', error);
+      return {};
+    }
   }
 
   /**
@@ -735,6 +768,20 @@ export class MCPManager {
   }
 
   /**
+   * Get the path to the OCR Tools MCP server file
+   */
+  private getOcrToolsServerPath(): string {
+    return this.getMcpServerPath('ocr-tools-server.ts');
+  }
+
+  /**
+   * Get the path to the Weather Tools MCP server file
+   */
+  private getWeatherToolsServerPath(): string {
+    return this.getMcpServerPath('weather-tools-server.ts');
+  }
+
+  /**
    * Connect to a single MCP server
    */
   private async connectServer(config: MCPServerConfig): Promise<void> {
@@ -794,7 +841,11 @@ export class MCPManager {
         config.name === 'Software_Development' ||
         config.name === 'Software Development' ||
         config.name === 'Office_Tools' ||
-        config.name === 'Office Tools';
+        config.name === 'Office Tools' ||
+        config.name === 'OCR_Tools' ||
+        config.name === 'OCR Tools' ||
+        config.name === 'Weather_Tools' ||
+        config.name === 'Weather Tools';
       const isOldConfig =
         (command === 'npx' || command.endsWith('/npx')) &&
         args.includes('-y') &&
@@ -825,6 +876,12 @@ export class MCPManager {
         if (arg === '{OFFICE_TOOLS_SERVER_PATH}') {
           return this.getOfficeToolsServerPath();
         }
+        if (arg === '{OCR_TOOLS_SERVER_PATH}') {
+          return this.getOcrToolsServerPath();
+        }
+        if (arg === '{WEATHER_TOOLS_SERVER_PATH}') {
+          return this.getWeatherToolsServerPath();
+        }
         return arg;
       });
 
@@ -843,6 +900,15 @@ export class MCPManager {
               `- Or change this server command to: npx -y tsx <server.ts>\n`
           );
         }
+      }
+
+      // For built-in content-generation servers (currently office-tools-server),
+      // pass the user's configured Ollama connection through as env vars so the
+      // standalone child process (no Electron/config-store access) uses the same
+      // base URL/API key/model the user set up, instead of a hardcoded localhost
+      // default. office-tools-server.ts's ollama-content.ts helper reads these.
+      if (config.name === 'Office_Tools' || config.name === 'Office Tools') {
+        Object.assign(config.env ?? (config.env = {}), await this.getOllamaEnvOverrides());
       }
 
       // Get environment variables before resolving npx so Windows can prefer a
@@ -1283,7 +1349,9 @@ export class MCPManager {
         logError(`[MCPManager]   1. Chrome failed to start`);
         logError(`[MCPManager]   2. Another process is using port 9222`);
         logError(`[MCPManager]   3. Firewall blocking the port`);
-        throw new Error('Chrome 浏览器未就绪，无法执行此操作: debug port did not become ready');
+        throw new Error(
+          'Chrome browser is not ready, cannot perform this operation: debug port did not become ready'
+        );
       }
 
       log(`[MCPManager] ✓ Chrome debug port is now ready`);
@@ -1312,7 +1380,7 @@ export class MCPManager {
             logError(`[MCPManager] Last error code: ${ve.code}, message: ${ve.message}`);
             logError(`[MCPManager] The chrome-devtools-mcp server may not be working correctly`);
             throw new Error(
-              'Chrome 浏览器未就绪，无法执行此操作: MCP connection verification failed after 5 attempts'
+              'Chrome browser is not ready, cannot perform this operation: MCP connection verification failed after 5 attempts'
             );
           }
         }
@@ -1321,7 +1389,7 @@ export class MCPManager {
       logError(`[MCPManager] ❌ Failed to start Chrome with debugging`);
       const startErrMsg = startError instanceof Error ? startError.message : String(startError);
       logError(`[MCPManager] Error: ${startErrMsg}`);
-      throw new Error(`Chrome 浏览器未就绪，无法执行此操作: ${startErrMsg}`);
+      throw new Error(`Chrome browser is not ready, cannot perform this operation: ${startErrMsg}`);
     }
   }
 

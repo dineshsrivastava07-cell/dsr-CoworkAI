@@ -19,7 +19,6 @@ files:
   - node_modules/@anthropic-ai/sdk/**/*
   # Externalized from the Electron main bundle; keep the runtime package in installers.
   - node_modules/@google/genai/**/*
-  - node_modules/@larksuiteoapi/**/*
   - node_modules/openai/**/*
   - node_modules/@modelcontextprotocol/**/*
   - node_modules/electron-updater/**/*
@@ -31,6 +30,12 @@ files:
   - node_modules/dotenv/**/*
   - node_modules/bufferutil/**/*
   - node_modules/utf-8-validate/**/*
+  # OCR MCP server dependency, externalized from its esbuild bundle: tesseract.js
+  # spawns its Node worker script by file path via worker_threads and loads WASM
+  # core files by path, neither of which survives being inlined into a single
+  # bundled JS file — it needs a real on-disk install to resolve those paths.
+  - node_modules/tesseract.js/**/*
+  - node_modules/tesseract.js-core/**/*
   # Exclude non-essential files from node_modules to reduce bundle size
   - '!**/*.js.map'
   - '!**/*.mjs.map'
@@ -61,6 +66,10 @@ asarUnpack:
   - node_modules/better-sqlite3/**/*.node
   - node_modules/bufferutil/**/*.node
   - node_modules/utf-8-validate/**/*.node
+  # tesseract.js's Node worker script is loaded via worker_threads by file path,
+  # which cannot read from inside an asar archive — must stay on real disk.
+  - node_modules/tesseract.js/**/*
+  - node_modules/tesseract.js-core/**/*
 
 win:
   icon: resources/icon.ico
