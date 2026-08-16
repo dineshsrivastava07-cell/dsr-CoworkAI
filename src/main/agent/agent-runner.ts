@@ -544,7 +544,6 @@ interface CachedPiSession {
   thinkingLevel: string;
   runtimeSignature: string;
   skillsSignature?: string;
-  ollamaNumCtx?: { value: number };
 }
 
 /**
@@ -1222,6 +1221,18 @@ ${hints.join('\n')}
    * the backend, but the renderer's loading spinner may not clear. This is
    * a renderer-side issue tracked as a follow-up.
    */
+  /** Get-or-create the session-scoped LoopGuard. Session-scoped (not per-turn) —
+   * see the `loopGuards` field doc for why. Shared between the permission hook
+   * (installed once at session creation) and the per-turn prompt() loop. */
+  private getOrCreateLoopGuard(sessionId: string): LoopGuard {
+    let loopGuard = this.loopGuards.get(sessionId);
+    if (!loopGuard) {
+      loopGuard = new LoopGuard();
+      this.loopGuards.set(sessionId, loopGuard);
+    }
+    return loopGuard;
+  }
+
   private installPermissionHook(piSession: PiAgentSession, sessionId: string): void {
     if (!this.requestPermission) {
       log('[CoworkAgentRunner] No requestPermission callback — skipping permission hook');
@@ -1294,6 +1305,44 @@ ${hints.join('\n')}
 
           if (result === 'deny') {
             log(`[CoworkAgentRunner] Tool '${toolName}' denied by user`);
+
+            // Repeated denials are an explicit, unambiguous "stop" signal —
+            // track them the same way as tool-call loops so the agent halts
+            // instead of silently moving on to try something else.
+            const loopGuard = this.getOrCreateLoopGuard(sessionId);
+            const denialDecision = loopGuard.recordPermissionDenial();
+            if (denialDecision.action === 'permission_denial_warn') {
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const sessionAny = piSession as any;
+                if (typeof sessionAny.sendUserMessage === 'function') {
+                  Promise.resolve(
+                    sessionAny.sendUserMessage(buildWarnSteerMessage(denialDecision), {
+                      deliverAs: 'steer',
+                    })
+                  ).catch((err: unknown) => {
+                    logWarn('[LoopGuard] sendUserMessage(permission steer) failed:', err);
+                  });
+                }
+              } catch (steerErr) {
+                logWarn('[LoopGuard] permission steer setup failed:', steerErr);
+              }
+            } else if (denialDecision.action === 'permission_denial_abort') {
+              logWarn(`[LoopGuard] ${denialDecision.reason} — aborting turn`);
+              this.sendMessage(sessionId, {
+                id: uuidv4(),
+                sessionId,
+                role: 'assistant',
+                content: [{ type: 'text', text: buildAbortUserMessage(denialDecision) }],
+                timestamp: Date.now(),
+              });
+              try {
+                agent.abort();
+              } catch (abortErr) {
+                logWarn('[LoopGuard] abort error after repeated permission denials:', abortErr);
+              }
+            }
+
             return { block: true, reason: `User denied permission for '${displayName}'.` };
           }
 
@@ -1302,7 +1351,9 @@ ${hints.join('\n')}
           }
         }
 
-        // Allowed — delegate to SDK's original hook for event pipeline
+        // Allowed — reset the denial streak (the interaction is back on track)
+        // and delegate to the SDK's original hook for the event pipeline.
+        this.getOrCreateLoopGuard(sessionId).recordPermissionAllow();
         return sdkBeforeToolCall ? sdkBeforeToolCall(ctx, signal) : undefined;
       }
     );
@@ -2556,14 +2607,6 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
           );
           await piSession.setModel(piModel);
           cachedSession.modelId = piModel.id;
-          // Update Ollama num_ctx ref if present
-          if (cachedSession.ollamaNumCtx) {
-            cachedSession.ollamaNumCtx.value = piModel.contextWindow || 128000;
-            log(
-              '[CoworkAgentRunner] Updated Ollama num_ctx on hot-swap:',
-              cachedSession.ollamaNumCtx.value
-            );
-          }
         }
         if (cachedSession.thinkingLevel !== thinkingLevel) {
           logCtx(
@@ -2687,45 +2730,25 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
           skillsSignature,
         });
 
-        // Ollama: wrap _onPayload to inject num_ctx into every request
-        if (provider === 'ollama') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const agent = piSession.agent as any;
-          // Guard: only patch if the SDK exposes _onPayload (private API)
-          if (!('_onPayload' in agent)) {
-            logWarn(
-              '[CoworkAgentRunner] SDK agent does not expose _onPayload — skipping Ollama num_ctx patch'
-            );
-          } else {
-            const originalOnPayload = agent._onPayload as
-              | ((
-                  payload: Record<string, unknown>,
-                  modelArg: unknown
-                ) => Promise<Record<string, unknown>>)
-              | undefined;
-            const ollamaNumCtx = {
-              value: piModel.contextWindow || 128000,
-            };
-            agent._onPayload = async (payload: Record<string, unknown>, modelArg: unknown) => {
-              let result = originalOnPayload
-                ? await originalOnPayload.call(agent, payload, modelArg)
-                : payload;
-              if (result === undefined) result = payload;
-              const finalPayload = { ...result, num_ctx: ollamaNumCtx.value };
-              if (process.env.COWORK_LOG_SDK_MESSAGES_FULL === '1') {
-                log(
-                  '[CoworkAgentRunner] Ollama outgoing request payload:',
-                  safeStringify(finalPayload, 2)
-                );
-              }
-              return finalPayload;
-            };
-            this.piSessions.get(session.id)!.ollamaNumCtx = ollamaNumCtx;
-            log(
-              '[CoworkAgentRunner] Ollama _onPayload wrapper installed, num_ctx:',
-              ollamaNumCtx.value
-            );
-          } // end else (_onPayload exists)
+        // NOTE: We previously tried to force num_ctx per-request here via a patched
+        // _onPayload hook. That doesn't work: this app talks to Ollama over its
+        // OpenAI-compatible /v1/chat/completions transport, which silently ignores
+        // num_ctx (top-level or nested under "options") — confirmed by direct testing.
+        // Ollama only honors num_ctx as a Modelfile-baked PARAMETER at model-load time.
+        // The real fix is ensuring the model itself is configured with an adequate
+        // context window (see ollama-api.ts's fetchOllamaModelInfo, which now reads
+        // that baked-in value instead of trusting the architecture's max supported
+        // context_length, which is frequently far larger than what actually gets loaded).
+        if (
+          provider === 'ollama' &&
+          typeof piModel.contextWindow === 'number' &&
+          piModel.contextWindow < 16384
+        ) {
+          logWarn(
+            '[CoworkAgentRunner] Ollama model context window is small:',
+            piModel.contextWindow,
+            '— long tool-heavy sessions may silently lose earlier context. Consider baking a larger `PARAMETER num_ctx` into the model via `ollama create`.'
+          );
         }
 
         logTiming('agent session created', runStartTime);
@@ -3341,7 +3364,9 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
       // them with the default "Task completed" below.
       const abortDisposition = resolveAbortDisposition({
         abortedByTimeout,
-        abortedByLoopGuard,
+        abortedByLoopGuard:
+          abortedByLoopGuard ||
+          (this.loopGuards.get(session.id)?.wasAbortedByPermissionDenial() ?? false),
         abortedByStreamError,
       });
       if (controller.signal.aborted && shouldPreserveExistingTrace(abortDisposition)) {
@@ -3359,7 +3384,9 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
       if (error instanceof Error && error.name === 'AbortError') {
         const abortDisposition = resolveAbortDisposition({
           abortedByTimeout,
-          abortedByLoopGuard,
+          abortedByLoopGuard:
+            abortedByLoopGuard ||
+            (this.loopGuards.get(session.id)?.wasAbortedByPermissionDenial() ?? false),
           abortedByStreamError,
         });
         if (abortDisposition === 'timeout') {

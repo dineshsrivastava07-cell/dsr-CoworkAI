@@ -193,9 +193,12 @@ export function compactTranscript(turns: MemoryTranscriptTurn[]): string {
 
 // Tool results that clearly signal a failed/no-op action (e.g. browser automation
 // tools like Chrome MCP return descriptive failure text without ever setting the
-// MCP-level `isError` flag, so it can't be relied on here).
+// MCP-level `isError` flag, so it can't be relied on here). Includes permission
+// denials — "User denied permission for 'X'." / "Tool 'X' is denied by your
+// permission rules." — which is its own distinct failure mode (see
+// looksLikeDegenerateAutomationSession doc comment) from plain tool errors.
 const TOOL_FAILURE_SIGNAL_PATTERN =
-  /\b(no page selected|navigation timeout|has been closed|timed?\s*out|could not|unable to|failed to|error:)\b/i;
+  /\b(no page selected|navigation timeout|has been closed|timed?\s*out|could not|unable to|failed to|error:|denied)\b/i;
 
 /**
  * Heuristic guard against memorizing a session whose tool interactions were

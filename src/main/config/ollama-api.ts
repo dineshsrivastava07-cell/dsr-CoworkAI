@@ -260,23 +260,34 @@ export async function fetchOllamaModelInfo(input: {
 
     let contextWindow: number | undefined;
 
-    // Try model_info.context_length (newer Ollama versions)
-    const modelInfo = data.model_info as Record<string, unknown> | undefined;
-    if (modelInfo) {
-      // The key varies by architecture, e.g. "llama.context_length", "qwen2.context_length"
-      for (const key of Object.keys(modelInfo)) {
-        if (key.endsWith('.context_length') && typeof modelInfo[key] === 'number') {
-          contextWindow = modelInfo[key] as number;
-          break;
-        }
-      }
-    }
-
-    // Fallback: parse num_ctx from Modelfile-style parameters string
-    if (!contextWindow && typeof data.parameters === 'string') {
+    // Prefer an explicit num_ctx Modelfile parameter — this is what Ollama actually
+    // loads the model with. model_info.*.context_length (below) is the architecture's
+    // max *supported* context, which is frequently far larger than what Ollama will
+    // actually allocate at load time (Ollama silently caps context to fit available
+    // memory, and per-request num_ctx overrides are not honored over the OpenAI-compat
+    // /v1/chat/completions transport this app uses — see agent-runner.ts). Trusting
+    // the architecture max here previously caused the app to believe it had far more
+    // context than the model was actually running with, silently truncating long
+    // sessions and derailing the model into hallucinated continuations.
+    if (typeof data.parameters === 'string') {
       const match = (data.parameters as string).match(/num_ctx\s+(\d+)/);
       if (match) {
         contextWindow = parseInt(match[1], 10);
+      }
+    }
+
+    // Fallback: architecture's max context_length, only when no explicit num_ctx is
+    // configured (newer Ollama versions expose this via model_info).
+    if (!contextWindow) {
+      const modelInfo = data.model_info as Record<string, unknown> | undefined;
+      if (modelInfo) {
+        // The key varies by architecture, e.g. "llama.context_length", "qwen2.context_length"
+        for (const key of Object.keys(modelInfo)) {
+          if (key.endsWith('.context_length') && typeof modelInfo[key] === 'number') {
+            contextWindow = modelInfo[key] as number;
+            break;
+          }
+        }
       }
     }
 

@@ -324,6 +324,56 @@ describe('LoopGuard layer 3 — per-tool frequency detection', () => {
   });
 });
 
+describe('LoopGuard layer 4 — permission-denial tracking', () => {
+  it('reproduces the reported scenario: the agent keeps proposing tools despite repeated denials', () => {
+    const guard = new LoopGuard();
+    expect(guard.recordPermissionDenial().action).toBe('none');
+    expect(guard.recordPermissionDenial().action).toBe('permission_denial_warn');
+    const third = guard.recordPermissionDenial();
+    expect(third.action).toBe('permission_denial_abort');
+    expect(third.count).toBe(3);
+    expect(guard.wasAbortedByPermissionDenial()).toBe(true);
+  });
+
+  it('counts denials of different tools the same as denials of the same tool', () => {
+    // The real failure denies a different tool every time (navigate_page, then
+    // new_page, then spawn_subagent, ...) — the counter must not require the
+    // same tool name to accumulate.
+    const guard = new LoopGuard();
+    guard.recordPermissionDenial();
+    guard.recordPermissionDenial();
+    const third = guard.recordPermissionDenial();
+    expect(third.action).toBe('permission_denial_abort');
+  });
+
+  it('resets the streak when a tool call is allowed', () => {
+    const guard = new LoopGuard();
+    guard.recordPermissionDenial();
+    guard.recordPermissionAllow();
+    expect(guard.recordPermissionDenial().action).toBe('none');
+    expect(guard.recordPermissionDenial().action).toBe('permission_denial_warn');
+    expect(guard.wasAbortedByPermissionDenial()).toBe(false);
+  });
+
+  it('only fires the abort decision once even if denials keep accumulating', () => {
+    const guard = new LoopGuard();
+    guard.recordPermissionDenial();
+    guard.recordPermissionDenial();
+    expect(guard.recordPermissionDenial().action).toBe('permission_denial_abort');
+    expect(guard.recordPermissionDenial().action).toBe('none');
+    expect(guard.recordPermissionDenial().action).toBe('none');
+  });
+
+  it('honours custom thresholds via constructor', () => {
+    const guard = new LoopGuard({
+      permissionDenialWarnThreshold: 1,
+      permissionDenialAbortThreshold: 2,
+    });
+    expect(guard.recordPermissionDenial().action).toBe('permission_denial_warn');
+    expect(guard.recordPermissionDenial().action).toBe('permission_denial_abort');
+  });
+});
+
 describe('Message builders', () => {
   it('warn / halt / abort messages all contain the count or tool name', () => {
     const warnHash = buildWarnSteerMessage({ action: 'hash_warn', reason: 'x', count: 3 });
@@ -344,6 +394,27 @@ describe('Message builders', () => {
     expect(abortHash).toContain('8');
     expect(abortHash).toContain('Loop Guard');
     expect(abortHash).toContain('Thinking');
+  });
+
+  it('permission-denial warn/abort messages are clear about what happened, without the generic loop guidance', () => {
+    const warn = buildWarnSteerMessage({
+      action: 'permission_denial_warn',
+      reason: 'x',
+      count: 2,
+    });
+    expect(warn).toContain('2');
+    expect(warn).toContain('denied');
+
+    const abort = buildAbortUserMessage({
+      action: 'permission_denial_abort',
+      reason: 'x',
+      count: 3,
+    });
+    expect(abort).toContain('3');
+    expect(abort).toContain('denied');
+    // Should invite the user to redirect, not suggest switching models/thinking
+    // mode — that guidance is about model-quality loops, not user pushback.
+    expect(abort).not.toContain('Thinking');
   });
 });
 

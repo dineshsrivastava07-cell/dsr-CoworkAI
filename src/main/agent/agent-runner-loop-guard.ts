@@ -73,6 +73,11 @@ export interface LoopGuardConfig {
   toolNameStreakHaltThreshold: number;
   /** Same tool-name sequence (args ignored) repeated this many times in a row → unilateral abort. */
   toolNameStreakAbortThreshold: number;
+  /** Consecutive user permission denials → soft warning steer message. */
+  permissionDenialWarnThreshold: number;
+  /** Consecutive user permission denials → unilateral abort. Denials are a much
+   * stronger "stop" signal than a tool-call loop, so this fires fast. */
+  permissionDenialAbortThreshold: number;
 }
 
 export const DEFAULT_LOOP_GUARD_CONFIG: LoopGuardConfig = {
@@ -87,6 +92,8 @@ export const DEFAULT_LOOP_GUARD_CONFIG: LoopGuardConfig = {
   toolNameStreakWarnThreshold: 4,
   toolNameStreakHaltThreshold: 7,
   toolNameStreakAbortThreshold: 12,
+  permissionDenialWarnThreshold: 2,
+  permissionDenialAbortThreshold: 3,
 };
 
 export interface ToolCallDescriptor {
@@ -104,7 +111,9 @@ export type LoopGuardAction =
   | 'name_abort'
   | 'freq_warn'
   | 'freq_halt'
-  | 'freq_abort';
+  | 'freq_abort'
+  | 'permission_denial_warn'
+  | 'permission_denial_abort';
 
 export interface LoopGuardDecision {
   action: LoopGuardAction;
@@ -255,6 +264,20 @@ export class LoopGuard {
   private readonly toolWarnIssued = new Set<string>();
   private readonly toolHaltIssued = new Set<string>();
   private readonly toolAbortIssued = new Set<string>();
+  /** Consecutive user permission denials. Reset to 0 on any allow. */
+  private consecutiveDenials = 0;
+  private denialWarnIssued = false;
+  private denialAbortIssued = false;
+  /**
+   * Set when recordPermissionDenial() crosses the abort threshold. The
+   * permission hook that calls it runs in a different closure/scope than the
+   * per-turn prompt() code (installed once at session creation, invoked
+   * across many turns), so it can't set prompt()'s local abortedByLoopGuard
+   * flag directly — the per-turn code reads this instead, via the same
+   * session-scoped LoopGuard instance, to suppress the generic "Cancelled"
+   * trace overwrite the same way a pattern-based loop abort already does.
+   */
+  private permissionAbortTriggered = false;
 
   constructor(config: Partial<LoopGuardConfig> = {}) {
     this.config = { ...DEFAULT_LOOP_GUARD_CONFIG, ...config };
@@ -399,6 +422,49 @@ export class LoopGuard {
     return NOOP_DECISION;
   }
 
+  /**
+   * Record that the user denied a tool-call permission request. Call once per
+   * denial, regardless of which tool was denied — repeatedly denying *different*
+   * tools is just as strong a "stop asking" signal as denying the same one.
+   * Thresholds are deliberately low (default warn=2, abort=3): a denial is an
+   * explicit, unambiguous user action, not an inferred pattern like a tool loop.
+   */
+  recordPermissionDenial(): LoopGuardDecision {
+    this.consecutiveDenials += 1;
+    const count = this.consecutiveDenials;
+
+    if (count >= this.config.permissionDenialAbortThreshold && !this.denialAbortIssued) {
+      this.denialAbortIssued = true;
+      this.permissionAbortTriggered = true;
+      return this.mkDecision(
+        'permission_denial_abort',
+        `user denied ${count} tool-call permission requests in a row`,
+        { count }
+      );
+    }
+    if (count >= this.config.permissionDenialWarnThreshold && !this.denialWarnIssued) {
+      this.denialWarnIssued = true;
+      return this.mkDecision(
+        'permission_denial_warn',
+        `user denied ${count} tool-call permission requests in a row`,
+        { count }
+      );
+    }
+    return NOOP_DECISION;
+  }
+
+  /** Reset the denial streak — call when a tool call is allowed. */
+  recordPermissionAllow(): void {
+    this.consecutiveDenials = 0;
+    this.denialWarnIssued = false;
+    this.denialAbortIssued = false;
+  }
+
+  /** Whether recordPermissionDenial() has triggered an abort. See field doc above. */
+  wasAbortedByPermissionDenial(): boolean {
+    return this.permissionAbortTriggered;
+  }
+
   /** Expose raw counters for diagnostics / testing. */
   snapshot(): {
     currentHash: string | null;
@@ -494,6 +560,12 @@ export function buildWarnSteerMessage(decision: LoopGuardDecision): string {
       'Changing the arguments each time does not avoid the loop. Please reassess your approach — reuse the result of a prior call, or stop and explain to the user what is blocking progress.'
     );
   }
+  if (decision.action === 'permission_denial_warn') {
+    return (
+      `[Loop Guard · Warning] The user has denied ${decision.count} tool-call permission requests in a row.\n` +
+      'Stop proposing new tool calls. Ask the user directly, in plain text, what they actually want you to do instead.'
+    );
+  }
   return '[Loop Guard · Warning]';
 }
 
@@ -538,6 +610,13 @@ export function buildAbortUserMessage(decision: LoopGuardDecision): string {
     return (
       `**Loop Guard: The model continued calling "${decision.toolName}" ${decision.count} times in a row with varying arguments, even after receiving stop instructions. Session forcibly terminated.**` +
       LOOP_GUARD_GUIDANCE
+    );
+  }
+  if (decision.action === 'permission_denial_abort') {
+    return (
+      `**Stopped: you denied ${decision.count} tool-call requests in a row, so I stopped trying.**\n\n` +
+      "Tell me what you'd actually like me to do — for example, a specific site to open, or say " +
+      '"just chat, no tools" if you want a text-only answer.'
     );
   }
   return (

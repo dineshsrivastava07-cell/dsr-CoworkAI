@@ -84,4 +84,23 @@ describe('looksLikeDegenerateAutomationSession', () => {
     ];
     expect(looksLikeDegenerateAutomationSession(messages)).toBe(false);
   });
+
+  it('reproduces the second reported bug scenario: repeated permission denials', () => {
+    // A distinct failure mode from the first regression test above — the
+    // browser calls themselves succeed at the transport level, but the user
+    // denies permission for each one. This slipped through the original
+    // filter (which only matched browser error text like "no page selected")
+    // and got memorized, then re-injected into a later session, priming the
+    // model to repeat the same derailment.
+    const messages: Message[] = [
+      userMessage(
+        'connect browser and open amazon.in and search for phones and computer accessories'
+      ),
+      toolResultMessage('Successfully navigated to https://www.amazon.in.'),
+      toolResultMessage("User denied permission for 'navigate_page'."),
+      toolResultMessage("User denied permission for 'new_page'."),
+      toolResultMessage("User denied permission for 'new_page'."),
+    ];
+    expect(looksLikeDegenerateAutomationSession(messages)).toBe(true);
+  });
 });
