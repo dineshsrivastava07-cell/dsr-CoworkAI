@@ -32,6 +32,7 @@ import type {
   McpTool,
   McpServerStatus,
   McpPresetsMap,
+  GoogleConnectionStatus,
   RemoteConfig,
   GatewayConfig,
   PairedUser,
@@ -242,6 +243,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getTools: (): Promise<McpTool[]> => ipcRenderer.invoke('mcp.getTools'),
     getServerStatus: (): Promise<McpServerStatus[]> => ipcRenderer.invoke('mcp.getServerStatus'),
     getPresets: (): Promise<McpPresetsMap> => ipcRenderer.invoke('mcp.getPresets'),
+  },
+
+  // Google Workspace connector methods
+  google: {
+    getStatus: (): Promise<GoogleConnectionStatus> => ipcRenderer.invoke('google.getStatus'),
+    saveClientCredentials: (payload: {
+      clientId: string;
+      clientSecret: string;
+    }): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('google.saveClientCredentials', payload),
+    connectAccount: (): Promise<{ success: boolean; accountEmail?: string; error?: string }> =>
+      ipcRenderer.invoke('google.connectAccount'),
+    disconnectAccount: (): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('google.disconnectAccount'),
   },
 
   // Skills methods
@@ -543,6 +558,15 @@ declare global {
         getTools: () => Promise<McpTool[]>;
         getServerStatus: () => Promise<McpServerStatus[]>;
         getPresets: () => Promise<McpPresetsMap>;
+      };
+      google: {
+        getStatus: () => Promise<GoogleConnectionStatus>;
+        saveClientCredentials: (payload: {
+          clientId: string;
+          clientSecret: string;
+        }) => Promise<{ success: boolean; error?: string }>;
+        connectAccount: () => Promise<{ success: boolean; accountEmail?: string; error?: string }>;
+        disconnectAccount: () => Promise<{ success: boolean; error?: string }>;
       };
       skills: {
         getAll: () => Promise<Skill[]>;

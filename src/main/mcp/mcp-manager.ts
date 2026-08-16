@@ -389,6 +389,31 @@ export class MCPManager {
   }
 
   /**
+   * Resolve the Google token broker's port + per-launch bearer secret into env
+   * var overrides for the Google_Workspace server. The broker (which owns the
+   * encrypted token store, Electron-only) is the only way that bare-Node child
+   * process can obtain a live, auto-refreshed access token.
+   *
+   * Loaded via dynamic import for the same reason as getOllamaEnvOverrides —
+   * keep this optional/best-effort and avoid pulling electron-store into
+   * contexts that don't fully mock it.
+   */
+  private async getGoogleWorkspaceEnvOverrides(): Promise<Record<string, string>> {
+    try {
+      const { getGoogleTokenBrokerConnectionInfo } = await import('../google/google-token-broker');
+      const info = getGoogleTokenBrokerConnectionInfo();
+      if (!info) return {};
+      return {
+        GOOGLE_TOKEN_BROKER_PORT: String(info.port),
+        GOOGLE_TOKEN_BROKER_SECRET: info.secret,
+      };
+    } catch (error) {
+      logWarn('[MCPManager] Could not read Google token broker connection info:', error);
+      return {};
+    }
+  }
+
+  /**
    * Get enhanced environment with proper PATH for packaged app
    * This is critical for packaged apps where process.env is very limited
    */
@@ -782,6 +807,13 @@ export class MCPManager {
   }
 
   /**
+   * Get the path to the Google Workspace MCP server file
+   */
+  private getGoogleWorkspaceServerPath(): string {
+    return this.getMcpServerPath('google-workspace-server.ts');
+  }
+
+  /**
    * Connect to a single MCP server
    */
   private async connectServer(config: MCPServerConfig): Promise<void> {
@@ -845,7 +877,9 @@ export class MCPManager {
         config.name === 'OCR_Tools' ||
         config.name === 'OCR Tools' ||
         config.name === 'Weather_Tools' ||
-        config.name === 'Weather Tools';
+        config.name === 'Weather Tools' ||
+        config.name === 'Google_Workspace' ||
+        config.name === 'Google Workspace';
       const isOldConfig =
         (command === 'npx' || command.endsWith('/npx')) &&
         args.includes('-y') &&
@@ -882,6 +916,9 @@ export class MCPManager {
         if (arg === '{WEATHER_TOOLS_SERVER_PATH}') {
           return this.getWeatherToolsServerPath();
         }
+        if (arg === '{GOOGLE_WORKSPACE_SERVER_PATH}') {
+          return this.getGoogleWorkspaceServerPath();
+        }
         return arg;
       });
 
@@ -909,6 +946,12 @@ export class MCPManager {
       // default. office-tools-server.ts's ollama-content.ts helper reads these.
       if (config.name === 'Office_Tools' || config.name === 'Office Tools') {
         Object.assign(config.env ?? (config.env = {}), await this.getOllamaEnvOverrides());
+      }
+
+      // Google_Workspace has no credentials of its own — it fetches a live
+      // access token from the main process's token broker on every call.
+      if (config.name === 'Google_Workspace' || config.name === 'Google Workspace') {
+        Object.assign(config.env ?? (config.env = {}), await this.getGoogleWorkspaceEnvOverrides());
       }
 
       // Get environment variables before resolving npx so Windows can prefer a
@@ -953,6 +996,7 @@ export class MCPManager {
         OPENAI_ACCOUNT_ID: env.OPENAI_ACCOUNT_ID?.trim() ? 'set' : 'unset',
         ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY?.trim() ? 'set' : 'unset',
         ANTHROPIC_AUTH_TOKEN: env.ANTHROPIC_AUTH_TOKEN?.trim() ? 'set' : 'unset',
+        GOOGLE_TOKEN_BROKER_SECRET: env.GOOGLE_TOKEN_BROKER_SECRET?.trim() ? 'set' : 'unset',
       });
 
       // In production, set NODE_PATH to include unpacked node_modules

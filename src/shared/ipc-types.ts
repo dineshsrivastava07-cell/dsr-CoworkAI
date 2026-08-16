@@ -61,6 +61,21 @@ export type McpPresetsMap = Record<
 >;
 
 // ---------------------------------------------------------------------------
+// Google Workspace connector
+// ---------------------------------------------------------------------------
+
+/** Connection status for the Google Workspace connector (mirrors GoogleConnectionStatus in main/google/index.ts). */
+export interface GoogleConnectionStatus {
+  connected: boolean;
+  accountEmail: string | null;
+  needsReconnect: boolean;
+  lastErrorMessage: string | null;
+  hasClientCredentials: boolean;
+  /** True when credentials came from bundled env vars — UI hides the credential form. */
+  credentialsAreBundled: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Remote
 // ---------------------------------------------------------------------------
 

@@ -51,6 +51,16 @@ const servers = [
     entry: 'weather-tools-server.ts',
     description: 'Weather Tools MCP Server (Open-Meteo)',
   },
+  {
+    name: 'google-workspace-server',
+    entry: 'google-workspace-server.ts',
+    description: 'Google Workspace MCP Server (Gmail, Drive, Calendar — read-only)',
+    // pdf-parse has a known module-load-time debug harness that can throw
+    // under certain bundler/CJS-wrapper shapes when esbuild inlines it — keep
+    // it a real on-disk package (same mitigation tesseract.js needed above,
+    // different underlying reason) and dynamic-import it at call time.
+    extraExternals: ['pdf-parse'],
+  },
 ];
 
 const NODE_EXTERNALS = [

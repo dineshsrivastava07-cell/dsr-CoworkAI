@@ -73,6 +73,18 @@ export const MCP_SERVER_PRESETS: Record<
       // No environment variables required
     },
   },
+  'google-workspace': {
+    name: 'Google_Workspace',
+    type: 'stdio',
+    command: 'node',
+    args: ['{GOOGLE_WORKSPACE_SERVER_PATH}'], // Path will be resolved at runtime (compiled JS in production)
+    env: {},
+    requiresEnv: [],
+    envDescription: {
+      // No environment variables required — token broker port/secret are
+      // injected transiently at spawn time by mcp-manager.ts, never persisted here.
+    },
+  },
 };
 
 function isOfficeToolsServerName(name: string): boolean {
@@ -257,6 +269,13 @@ class MCPConfigStore {
     return this.getMcpServerPath('office-tools-server.ts');
   }
 
+  /**
+   * Get the path to the Google Workspace MCP server file
+   */
+  private getGoogleWorkspaceServerPath(): string | null {
+    return this.getMcpServerPath('google-workspace-server.ts');
+  }
+
   private createBuiltinOfficeToolsConfig(): MCPServerConfig {
     const preset = MCP_SERVER_PRESETS['office-tools'];
     return {
@@ -295,6 +314,9 @@ class MCPConfigStore {
           }
           if (arg === '{OFFICE_TOOLS_SERVER_PATH}') {
             return this.getOfficeToolsServerPath() || arg;
+          }
+          if (arg === '{GOOGLE_WORKSPACE_SERVER_PATH}') {
+            return this.getGoogleWorkspaceServerPath() || arg;
           }
           return arg;
         }),
