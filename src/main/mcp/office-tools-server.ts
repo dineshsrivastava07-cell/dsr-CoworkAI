@@ -771,12 +771,23 @@ interface WordTableDef {
 }
 
 interface WordBlock {
-  type: 'paragraph' | 'bullet_list' | 'numbered_list' | 'table' | 'page_break';
+  type?: 'paragraph' | 'bullet_list' | 'numbered_list' | 'table' | 'page_break';
   heading?: string;
   heading_level?: 1 | 2 | 3;
   text?: string;
-  items?: string[];
+  items?: (string | { text?: string })[];
   table?: WordTableDef;
+}
+
+function normalizeWordBlockItems(items: WordBlock['items']): string[] {
+  return (items || []).map((item) => (typeof item === 'string' ? item : (item?.text ?? '')));
+}
+
+function inferWordBlockType(block: WordBlock): NonNullable<WordBlock['type']> {
+  if (block.type) return block.type;
+  if (block.table) return 'table';
+  if (block.items && block.items.length) return 'bullet_list';
+  return 'paragraph';
 }
 
 interface CreateWordParams {
@@ -833,7 +844,9 @@ async function createWordDocument(params: CreateWordParams): Promise<string> {
       );
     }
 
-    switch (block.type) {
+    const blockItems = normalizeWordBlockItems(block.items);
+
+    switch (inferWordBlockType(block)) {
       case 'paragraph': {
         if (block.text) {
           const lines = block.text.split('\n');
@@ -850,7 +863,7 @@ async function createWordDocument(params: CreateWordParams): Promise<string> {
       }
 
       case 'bullet_list': {
-        for (const item of block.items || []) {
+        for (const item of blockItems) {
           children.push(
             new Paragraph({
               text: item,
@@ -863,10 +876,10 @@ async function createWordDocument(params: CreateWordParams): Promise<string> {
       }
 
       case 'numbered_list': {
-        for (let i = 0; i < (block.items || []).length; i++) {
+        for (let i = 0; i < blockItems.length; i++) {
           children.push(
             new Paragraph({
-              text: `${i + 1}. ${block.items![i]}`,
+              text: `${i + 1}. ${blockItems[i]}`,
               spacing: { after: 80 },
               indent: { left: 360 },
             })
@@ -2460,8 +2473,14 @@ function createMcpServer() {
                     },
                     items: {
                       type: 'array',
-                      items: { type: 'string' },
-                      description: 'For bullet_list or numbered_list: array of list item strings',
+                      items: {
+                        oneOf: [
+                          { type: 'string' },
+                          { type: 'object', properties: { text: { type: 'string' } } },
+                        ],
+                      },
+                      description:
+                        'For bullet_list or numbered_list: array of list item strings (e.g. ["Item one", "Item two"]).',
                     },
                     table: {
                       type: 'object',
@@ -2481,7 +2500,8 @@ function createMcpServer() {
                       required: ['headers', 'rows'],
                     },
                   },
-                  required: ['type'],
+                  description:
+                    'type is optional if the block has a heading and items — it defaults to bullet_list.',
                 },
               },
             },

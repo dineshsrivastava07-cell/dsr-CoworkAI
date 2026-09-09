@@ -1793,7 +1793,7 @@ export class MCPManager {
         }
 
         logTiming(`MCP tool ${actualToolName}`, callStartTime);
-        return result;
+        return truncateOversizedToolResult(result);
       } catch (error: unknown) {
         lastError = error;
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1973,6 +1973,56 @@ export function mergeShellEnvForMcp(
     }
   }
   return merged;
+}
+
+// Some MCP tools (e.g. browser-automation "take a full page snapshot" tools)
+// return an unfiltered accessibility-tree dump with no size limit — a single
+// real-world page can return 100,000+ characters of mostly-irrelevant DOM
+// structure. Feeding that whole block into the model's context right before
+// its next decision has been observed to derail agentic reasoning across
+// every provider tested (local and cloud alike), not because the context
+// window overflows, but because that much low-signal noise in one turn makes
+// it hard for any model to stay anchored on the actual task. This caps any
+// oversized text content block from ANY MCP server before it reaches the
+// agent — general, not tied to a specific tool or server name.
+export const MAX_TOOL_RESULT_TEXT_LENGTH = 20000;
+
+export function truncateOversizedToolResult(result: unknown): unknown {
+  if (!result || typeof result !== 'object' || !('content' in result)) {
+    return result;
+  }
+  const content = (result as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return result;
+  }
+
+  let truncatedAny = false;
+  const nextContent = content.map((block) => {
+    if (
+      block &&
+      typeof block === 'object' &&
+      (block as { type?: unknown }).type === 'text' &&
+      typeof (block as { text?: unknown }).text === 'string'
+    ) {
+      const text = (block as { text: string }).text;
+      if (text.length > MAX_TOOL_RESULT_TEXT_LENGTH) {
+        truncatedAny = true;
+        const omitted = text.length - MAX_TOOL_RESULT_TEXT_LENGTH;
+        return {
+          ...block,
+          text:
+            text.slice(0, MAX_TOOL_RESULT_TEXT_LENGTH) +
+            `\n\n[...truncated, ${omitted} more characters. This result was too large to include in full — use a more targeted query, filter, or a follow-up tool call to narrow it down instead of requesting the full content again.]`,
+        };
+      }
+    }
+    return block;
+  });
+
+  if (!truncatedAny) {
+    return result;
+  }
+  return { ...(result as Record<string, unknown>), content: nextContent };
 }
 
 function extractStructuredToolErrorMessage(result: unknown): string {

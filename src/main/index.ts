@@ -1036,8 +1036,9 @@ app
           if (title !== task.title) {
             headlessScheduledTaskStore.update(task.id, { title });
           }
-          await sessionManager.startSession(title, task.prompt, task.cwd);
-          return { sessionId: '' };
+          const started = await sessionManager.startSession(title, task.prompt, task.cwd);
+          sessionManager.markSessionScheduled(started.id);
+          return { sessionId: started.id };
         },
         onTaskError: (taskId, error) => {
           headlessSendWithPermission({
@@ -1450,6 +1451,7 @@ app
           scheduledTaskStore.update(task.id, { title });
         }
         const started = await sessionManager.startSession(title, task.prompt, task.cwd);
+        sessionManager.markSessionScheduled(started.id);
         // 定时任务创建的新会话需要主动同步到前端会话列表
         sendToRenderer({
           type: 'session.update',
@@ -3438,6 +3440,19 @@ async function handleClientEvent(event: ClientEvent): Promise<unknown> {
         setPermissionRules(
           (event.payload as { permissionRules: PermissionRule[] }).permissionRules
         );
+      }
+
+      if (typeof (event.payload as { autoApproveTools?: unknown }).autoApproveTools === 'boolean') {
+        configStore.update({
+          autoApproveTools: (event.payload as { autoApproveTools: boolean }).autoApproveTools,
+        });
+        sendToRenderer({
+          type: 'config.status',
+          payload: {
+            isConfigured: configStore.isConfigured(),
+            config: configStore.getAll(),
+          },
+        });
       }
       return null;
 

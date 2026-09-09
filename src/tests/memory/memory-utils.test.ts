@@ -103,4 +103,26 @@ describe('looksLikeDegenerateAutomationSession', () => {
     ];
     expect(looksLikeDegenerateAutomationSession(messages)).toBe(true);
   });
+
+  it('reproduces the third reported bug scenario: expired Google Workspace connection', () => {
+    // A daily scheduled "morning brief" task kept hitting an expired Google
+    // OAuth connection (7-day refresh-token expiry in Testing publishing
+    // status) and the model spiraled into fabricating workaround scripts
+    // instead of reporting the failure. Without this pattern, that failed
+    // session would get memorized and re-injected into future runs, priming
+    // the same derailment on every subsequent day.
+    const messages: Message[] = [
+      userMessage('Create Morning brief every day From Gmail, Google Drive and Calendar'),
+      toolResultMessage(
+        'Google connection for dineshsrivastava07@gmail.com needs to be re-authorized.'
+      ),
+      toolResultMessage(
+        '❌ Error in gmail_list_messages: Google connection for dineshsrivastava07@gmail.com needs to be re-authorized.'
+      ),
+      toolResultMessage(
+        'Google account is not connected. Open Settings → Connectors → Google Workspace and click "Connect".'
+      ),
+    ];
+    expect(looksLikeDegenerateAutomationSession(messages)).toBe(true);
+  });
 });

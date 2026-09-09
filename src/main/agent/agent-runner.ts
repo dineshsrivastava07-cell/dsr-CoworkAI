@@ -1284,6 +1284,18 @@ ${hints.join('\n')}
           };
         }
 
+        // Autonomous Mode: skip the requestPermission round-trip (and its
+        // wait for a click that may never come, e.g. scheduled/unattended
+        // runs) for tools that would otherwise land on 'ask'. Explicit
+        // 'deny' rules above are never affected, and this does not touch
+        // tool-level safety checks that are independent of the permission
+        // system (e.g. GUI_Operate's irreversible-click confirmation).
+        if (decision === 'ask' && configStore.get('autoApproveTools')) {
+          log(`[CoworkAgentRunner] Tool '${toolName}' auto-approved (Autonomous Mode)`);
+          this.getOrCreateLoopGuard(sessionId).recordPermissionAllow();
+          return sdkBeforeToolCall ? sdkBeforeToolCall(ctx, signal) : undefined;
+        }
+
         if (decision === 'ask') {
           const toolUseId = `${ctx.toolCall?.id ?? 'unknown'}-perm-${uuidv4().slice(0, 8)}`;
           let result: 'allow' | 'deny' | 'allow_always';
@@ -3202,6 +3214,46 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
                 timestamp: Date.now(),
               };
               this.sendMessage(session.id, toolResultMsg);
+
+              // Google Workspace connection expired/not connected is an
+              // unambiguous, unrecoverable-for-this-turn state — only the
+              // user re-authorizing in Settings can fix it. Stop immediately
+              // rather than let the model "creatively" work around it (e.g.
+              // writing scripts that fabricate/simulate the missing data,
+              // observed in production on a scheduled morning-brief task).
+              if (
+                isError &&
+                !controller.signal.aborted &&
+                /Google_Workspace/i.test(event.toolName) &&
+                /(needs to be re-authorized|is not connected)/i.test(outputText)
+              ) {
+                this.sendMessage(session.id, {
+                  id: uuidv4(),
+                  sessionId: session.id,
+                  role: 'assistant',
+                  content: [
+                    {
+                      type: 'text',
+                      text: 'Stopped: your Google Workspace connection needs to be re-authorized. Open Settings → Connectors → Google Workspace and click "Reconnect" — I cannot fetch real Gmail/Drive/Calendar data until then, and won\'t fabricate substitute data or scripts instead.',
+                    },
+                  ],
+                  timestamp: Date.now(),
+                });
+                hasEmittedError = true;
+                this.sendTraceUpdate(session.id, thinkingStepId, {
+                  status: 'error',
+                  title: 'Stopped: Google Workspace needs reconnect',
+                });
+                try {
+                  abortedByLoopGuard = true;
+                  controller.abort();
+                } catch (abortErr) {
+                  logWarn(
+                    '[CoworkAgentRunner] abort error after Google Workspace reconnect failure:',
+                    abortErr
+                  );
+                }
+              }
               break;
             }
 

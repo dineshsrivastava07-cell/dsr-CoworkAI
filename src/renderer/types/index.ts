@@ -634,6 +634,7 @@ export interface Settings {
   globalSkillsPath: string;
   memoryStrategy: 'auto' | 'manual' | 'rolling';
   maxContextTokens: number;
+  autoApproveTools: boolean;
 }
 
 // Tool types
@@ -746,6 +747,14 @@ export interface AppConfig {
   memoryEnabled?: boolean;
   memoryRuntime?: MemoryRuntimeConfig;
   enableThinking?: boolean;
+  /**
+   * Autonomous Mode: when true, tool calls that would otherwise show a
+   * permission dialog and wait (up to 60s) for a click are auto-approved
+   * instead. Does not override explicit 'deny' rules, and does not bypass
+   * tool-level safety checks that are independent of the permission system
+   * (e.g. GUI_Operate's irreversible-click confirmation).
+   */
+  autoApproveTools?: boolean;
   isConfigured: boolean;
 }
 
