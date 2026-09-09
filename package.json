@@ -97,7 +97,7 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "tesseract.js": "7.0.0",
-    "uuid": "^13.0.0",
+    "uuid": "^14.0.2",
     "ws": "^8.19.0",
     "zustand": "^5.0.12"
   },
