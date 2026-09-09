@@ -143,7 +143,7 @@ export function SettingsPanel({ onClose, initialTab = 'api' }: SettingsPanelProp
       id: 'remote' as TabId,
       label: t('settings.remote', 'Remote Control'),
       icon: Wifi,
-      description: t('settings.remoteDesc', 'Use dsr-CoworkAI remotely via Slack and integrations'),
+      description: t('settings.remoteDesc', 'Use V-Coworker remotely via Slack and integrations'),
     },
     {
       id: 'logs' as TabId,
@@ -172,7 +172,7 @@ export function SettingsPanel({ onClose, initialTab = 'api' }: SettingsPanelProp
               {t('settings.title')}
             </p>
             <h2 className="mt-1 text-[1.24rem] font-semibold tracking-[-0.03em] text-text-primary">
-              dsr-CoworkAI
+              V-Coworker
             </h2>
             <p className="mt-1 text-[11px] leading-4 text-text-muted">{t('settings.panelDesc')}</p>
           </div>

@@ -71,6 +71,7 @@ function createMockConfigStore(overrides: Partial<AppConfig> = {}) {
       storageRoot: '',
     },
     enableThinking: true,
+    autoApproveTools: false,
     isConfigured: true,
     ...overrides,
   };

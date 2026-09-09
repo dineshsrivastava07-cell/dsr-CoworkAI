@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ScheduledTaskManager,
+  defaultCheckCondition,
   type ScheduledTaskScheduleConfig,
   type ScheduledTask,
   type ScheduledTaskStore,
@@ -20,6 +21,9 @@ function createTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     scheduleConfig: null,
     repeatEvery: null,
     repeatUnit: null,
+    watchConfig: null,
+    lastCheckedState: null,
+    lastCheckedAt: null,
     lastRunAt: null,
     lastRunSessionId: null,
     lastError: null,
@@ -579,5 +583,245 @@ describe('ScheduledTaskManager', () => {
     const after = store.get('error-callback');
     expect(after?.lastError).toBe('execution failed');
     consoleSpy.mockRestore();
+  });
+
+  describe('watch tasks (reactive scheduling)', () => {
+    function createWatchTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
+      const now = Date.now();
+      return createTask({
+        id: 'watch-1',
+        runAt: now + 1000,
+        nextRunAt: now + 1000,
+        watchConfig: {
+          checkType: 'http',
+          http: { url: 'https://example.test/status' },
+          pollIntervalMs: 60_000,
+        },
+        ...overrides,
+      });
+    }
+
+    it('does not start a session when the checked condition is unchanged', async () => {
+      const store = createStore([createWatchTask()]);
+      const executeTask = vi.fn().mockResolvedValue({ sessionId: 'session-1' });
+      const checkCondition = vi.fn().mockResolvedValue({ changed: false, state: 'same-state' });
+
+      const manager = new ScheduledTaskManager({
+        store,
+        executeTask,
+        checkCondition,
+        now: () => Date.now(),
+      });
+      manager.start();
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(checkCondition).toHaveBeenCalledTimes(1);
+      expect(executeTask).not.toHaveBeenCalled();
+      const after = store.get('watch-1');
+      expect(after?.lastCheckedState).toBe('same-state');
+      expect(after?.lastCheckedAt).not.toBeNull();
+      expect(after?.enabled).toBe(true);
+      expect(after?.nextRunAt).toBe((after?.lastCheckedAt ?? 0) + 60_000);
+    });
+
+    it('starts a session when the checked condition changed', async () => {
+      const store = createStore([createWatchTask()]);
+      const executeTask = vi.fn().mockResolvedValue({ sessionId: 'session-2' });
+      const checkCondition = vi.fn().mockResolvedValue({ changed: true, state: 'new-state' });
+
+      const manager = new ScheduledTaskManager({
+        store,
+        executeTask,
+        checkCondition,
+        now: () => Date.now(),
+      });
+      manager.start();
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(checkCondition).toHaveBeenCalledTimes(1);
+      expect(executeTask).toHaveBeenCalledTimes(1);
+      const after = store.get('watch-1');
+      expect(after?.lastCheckedState).toBe('new-state');
+      expect(after?.lastRunSessionId).toBe('session-2');
+      // Watch tasks never self-disable like one-time tasks do.
+      expect(after?.enabled).toBe(true);
+      expect(after?.nextRunAt).not.toBeNull();
+    });
+
+    it('reschedules and records lastError, without starting a session, when the check itself fails', async () => {
+      const store = createStore([createWatchTask()]);
+      const executeTask = vi.fn().mockResolvedValue({ sessionId: 'session-3' });
+      const checkCondition = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+      const onTaskError = vi.fn();
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const manager = new ScheduledTaskManager({
+        store,
+        executeTask,
+        checkCondition,
+        onTaskError,
+        now: () => Date.now(),
+      });
+      manager.start();
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(executeTask).not.toHaveBeenCalled();
+      expect(onTaskError).toHaveBeenCalledWith('watch-1', 'ECONNREFUSED');
+      const after = store.get('watch-1');
+      expect(after?.lastError).toBe('ECONNREFUSED');
+      expect(after?.nextRunAt).not.toBeNull();
+      consoleSpy.mockRestore();
+    });
+
+    it('keeps polling indefinitely across multiple unchanged checks', async () => {
+      const store = createStore([
+        createWatchTask({
+          watchConfig: {
+            checkType: 'command',
+            command: { command: 'echo', args: ['hi'] },
+            pollIntervalMs: 60_000,
+          },
+        }),
+      ]);
+      const executeTask = vi.fn().mockResolvedValue({ sessionId: 'session-4' });
+      const checkCondition = vi.fn().mockResolvedValue({ changed: false, state: 'stable' });
+
+      const manager = new ScheduledTaskManager({
+        store,
+        executeTask,
+        checkCondition,
+        now: () => Date.now(),
+      });
+      manager.start();
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60_000);
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60_000);
+      await Promise.resolve();
+
+      expect(checkCondition).toHaveBeenCalledTimes(3);
+      expect(executeTask).not.toHaveBeenCalled();
+    });
+
+    it('create() floors pollIntervalMs at the minimum to prevent abusive polling', () => {
+      const store = createStore([]);
+      const executeTask = vi.fn().mockResolvedValue({ sessionId: 'x' });
+      const manager = new ScheduledTaskManager({ store, executeTask, now: () => Date.now() });
+
+      const created = manager.create({
+        prompt: 'watch something',
+        cwd: '/tmp/project',
+        runAt: Date.now() + 1000,
+        watchConfig: {
+          checkType: 'http',
+          http: { url: 'https://example.test' },
+          pollIntervalMs: 500, // far below the 60s floor
+        },
+      });
+
+      expect(created.watchConfig?.pollIntervalMs).toBe(60_000);
+    });
+
+    it('create() drops an http watchConfig missing a url', () => {
+      const store = createStore([]);
+      const executeTask = vi.fn().mockResolvedValue({ sessionId: 'x' });
+      const manager = new ScheduledTaskManager({ store, executeTask, now: () => Date.now() });
+
+      const created = manager.create({
+        prompt: 'watch something',
+        cwd: '/tmp/project',
+        runAt: Date.now() + 1000,
+        watchConfig: { checkType: 'http', http: { url: '' }, pollIntervalMs: 120_000 },
+      });
+
+      expect(created.watchConfig).toBeNull();
+    });
+  });
+});
+
+describe('defaultCheckCondition', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('reports unchanged on the first-ever check (establishes a baseline, does not fire immediately)', async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response('body-a', { status: 200 }));
+    const task = createTask({
+      watchConfig: {
+        checkType: 'http',
+        http: { url: 'https://example.test' },
+        pollIntervalMs: 60_000,
+      },
+      lastCheckedState: null,
+    });
+
+    const result = await defaultCheckCondition(task);
+
+    expect(result.changed).toBe(false);
+    expect(result.state).toContain('status:200');
+  });
+
+  it('reports changed when the response body hash differs from the last checked state', async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response('body-b', { status: 200 }));
+    const baseline = await defaultCheckCondition(
+      createTask({
+        watchConfig: {
+          checkType: 'http',
+          http: { url: 'https://example.test' },
+          pollIntervalMs: 60_000,
+        },
+        lastCheckedState: null,
+      })
+    );
+
+    global.fetch = vi.fn().mockResolvedValue(new Response('body-c', { status: 200 }));
+    const result = await defaultCheckCondition(
+      createTask({
+        watchConfig: {
+          checkType: 'http',
+          http: { url: 'https://example.test' },
+          pollIntervalMs: 60_000,
+        },
+        lastCheckedState: baseline.state,
+      })
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.state).not.toBe(baseline.state);
+  });
+
+  it('reports unchanged when the response body hash is identical to the last checked state', async () => {
+    global.fetch = vi
+      .fn()
+      .mockImplementation(async () => new Response('same-body', { status: 200 }));
+    const task = (state: string | null) =>
+      createTask({
+        watchConfig: {
+          checkType: 'http',
+          http: { url: 'https://example.test' },
+          pollIntervalMs: 60_000,
+        },
+        lastCheckedState: state,
+      });
+
+    const first = await defaultCheckCondition(task(null));
+    const second = await defaultCheckCondition(task(first.state));
+
+    expect(second.changed).toBe(false);
+    expect(second.state).toBe(first.state);
   });
 });

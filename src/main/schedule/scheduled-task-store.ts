@@ -27,6 +27,9 @@ export function createScheduledTaskStore(db: DatabaseInstance): ScheduledTaskSto
         repeat_every: input.repeatEvery ?? null,
         repeat_unit: input.repeatUnit ?? null,
         enabled: input.enabled === false ? 0 : 1,
+        watch_config: input.watchConfig ? JSON.stringify(input.watchConfig) : null,
+        last_checked_state: null,
+        last_checked_at: null,
         last_run_at: null,
         last_run_session_id: null,
         last_error: null,
@@ -63,6 +66,9 @@ function mapRowToTask(row: ScheduledTaskRow): ScheduledTask {
     repeatEvery: row.repeat_every,
     repeatUnit: row.repeat_unit as ScheduledTask['repeatUnit'],
     enabled: row.enabled === 1,
+    watchConfig: parseWatchConfig(row.watch_config),
+    lastCheckedState: row.last_checked_state,
+    lastCheckedAt: row.last_checked_at,
     lastRunAt: row.last_run_at,
     lastRunSessionId: row.last_run_session_id,
     lastError: row.last_error,
@@ -84,6 +90,11 @@ function mapTaskUpdatesToRow(updates: ScheduledTaskUpdateInput): Partial<Schedul
   if (updates.repeatEvery !== undefined) mapped.repeat_every = updates.repeatEvery;
   if (updates.repeatUnit !== undefined) mapped.repeat_unit = updates.repeatUnit;
   if (updates.enabled !== undefined) mapped.enabled = updates.enabled ? 1 : 0;
+  if (updates.watchConfig !== undefined) {
+    mapped.watch_config = updates.watchConfig ? JSON.stringify(updates.watchConfig) : null;
+  }
+  if (updates.lastCheckedState !== undefined) mapped.last_checked_state = updates.lastCheckedState;
+  if (updates.lastCheckedAt !== undefined) mapped.last_checked_at = updates.lastCheckedAt;
   if (updates.lastRunAt !== undefined) mapped.last_run_at = updates.lastRunAt;
   if (updates.lastRunSessionId !== undefined) mapped.last_run_session_id = updates.lastRunSessionId;
   if (updates.lastError !== undefined) mapped.last_error = updates.lastError;
@@ -96,6 +107,17 @@ function parseScheduleConfig(value: string | null): ScheduledTask['scheduleConfi
   }
   try {
     return JSON.parse(value) as ScheduledTask['scheduleConfig'];
+  } catch {
+    return null;
+  }
+}
+
+function parseWatchConfig(value: string | null): ScheduledTask['watchConfig'] {
+  if (!value) {
+    return null;
+  }
+  try {
+    return JSON.parse(value) as ScheduledTask['watchConfig'];
   } catch {
     return null;
   }

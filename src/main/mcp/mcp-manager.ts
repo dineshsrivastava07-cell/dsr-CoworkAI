@@ -25,6 +25,7 @@ import path from 'path';
 import { connectWithOAuthRetry, OpenCoworkMcpOAuthProvider } from './mcp-oauth';
 import { log, logError, logWarn, logCtx, logCtxError, logTiming } from '../utils/logger';
 import { getDefaultShell } from '../utils/shell-resolver';
+import type { ConfigStore } from '../config/config-store';
 
 const MCP_LIST_TOOLS_TIMEOUT_MS = 5 * 60 * 1000;
 const MCP_TOOL_CALL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -353,6 +354,63 @@ export class MCPManager {
       throw new Error('Bundled npx is unavailable.');
     }
     return this.npxPath;
+  }
+
+  /**
+   * Resolve the user's configured Ollama profile (config-store's dedicated
+   * 'ollama' provider profile, independent of whichever provider is active for
+   * chat) into env var overrides for built-in content-generation MCP servers.
+   * Falls back to empty (server uses its own localhost default) if unset or if
+   * config-store isn't ready yet.
+   *
+   * Loaded via dynamic import (not a static top-level import) so that merely
+   * importing mcp-manager.ts doesn't pull in electron-store — config-store.ts's
+   * transitive dependency — in contexts (like unit tests) that don't fully mock
+   * it. This keeps the Ollama-profile read fully optional/best-effort.
+   */
+  private async getOllamaEnvOverrides(): Promise<Record<string, string>> {
+    try {
+      const { configStore } = (await import('../config/config-store')) as {
+        configStore: ConfigStore;
+      };
+      const profile = configStore.getAll().profiles?.ollama;
+      const overrides: Record<string, string> = {};
+      if (profile?.baseUrl?.trim()) {
+        overrides.OLLAMA_BASE_URL = profile.baseUrl.trim();
+      }
+      if (profile?.apiKey?.trim()) {
+        overrides.OLLAMA_API_KEY = profile.apiKey.trim();
+      }
+      return overrides;
+    } catch (error) {
+      logWarn('[MCPManager] Could not read Ollama profile from config-store:', error);
+      return {};
+    }
+  }
+
+  /**
+   * Resolve the Google token broker's port + per-launch bearer secret into env
+   * var overrides for the Google_Workspace server. The broker (which owns the
+   * encrypted token store, Electron-only) is the only way that bare-Node child
+   * process can obtain a live, auto-refreshed access token.
+   *
+   * Loaded via dynamic import for the same reason as getOllamaEnvOverrides —
+   * keep this optional/best-effort and avoid pulling electron-store into
+   * contexts that don't fully mock it.
+   */
+  private async getGoogleWorkspaceEnvOverrides(): Promise<Record<string, string>> {
+    try {
+      const { getGoogleTokenBrokerConnectionInfo } = await import('../google/google-token-broker');
+      const info = getGoogleTokenBrokerConnectionInfo();
+      if (!info) return {};
+      return {
+        GOOGLE_TOKEN_BROKER_PORT: String(info.port),
+        GOOGLE_TOKEN_BROKER_SECRET: info.secret,
+      };
+    } catch (error) {
+      logWarn('[MCPManager] Could not read Google token broker connection info:', error);
+      return {};
+    }
   }
 
   /**
@@ -735,6 +793,27 @@ export class MCPManager {
   }
 
   /**
+   * Get the path to the OCR Tools MCP server file
+   */
+  private getOcrToolsServerPath(): string {
+    return this.getMcpServerPath('ocr-tools-server.ts');
+  }
+
+  /**
+   * Get the path to the Weather Tools MCP server file
+   */
+  private getWeatherToolsServerPath(): string {
+    return this.getMcpServerPath('weather-tools-server.ts');
+  }
+
+  /**
+   * Get the path to the Google Workspace MCP server file
+   */
+  private getGoogleWorkspaceServerPath(): string {
+    return this.getMcpServerPath('google-workspace-server.ts');
+  }
+
+  /**
    * Connect to a single MCP server
    */
   private async connectServer(config: MCPServerConfig): Promise<void> {
@@ -794,7 +873,13 @@ export class MCPManager {
         config.name === 'Software_Development' ||
         config.name === 'Software Development' ||
         config.name === 'Office_Tools' ||
-        config.name === 'Office Tools';
+        config.name === 'Office Tools' ||
+        config.name === 'OCR_Tools' ||
+        config.name === 'OCR Tools' ||
+        config.name === 'Weather_Tools' ||
+        config.name === 'Weather Tools' ||
+        config.name === 'Google_Workspace' ||
+        config.name === 'Google Workspace';
       const isOldConfig =
         (command === 'npx' || command.endsWith('/npx')) &&
         args.includes('-y') &&
@@ -825,6 +910,15 @@ export class MCPManager {
         if (arg === '{OFFICE_TOOLS_SERVER_PATH}') {
           return this.getOfficeToolsServerPath();
         }
+        if (arg === '{OCR_TOOLS_SERVER_PATH}') {
+          return this.getOcrToolsServerPath();
+        }
+        if (arg === '{WEATHER_TOOLS_SERVER_PATH}') {
+          return this.getWeatherToolsServerPath();
+        }
+        if (arg === '{GOOGLE_WORKSPACE_SERVER_PATH}') {
+          return this.getGoogleWorkspaceServerPath();
+        }
         return arg;
       });
 
@@ -843,6 +937,21 @@ export class MCPManager {
               `- Or change this server command to: npx -y tsx <server.ts>\n`
           );
         }
+      }
+
+      // For built-in content-generation servers (currently office-tools-server),
+      // pass the user's configured Ollama connection through as env vars so the
+      // standalone child process (no Electron/config-store access) uses the same
+      // base URL/API key/model the user set up, instead of a hardcoded localhost
+      // default. office-tools-server.ts's ollama-content.ts helper reads these.
+      if (config.name === 'Office_Tools' || config.name === 'Office Tools') {
+        Object.assign(config.env ?? (config.env = {}), await this.getOllamaEnvOverrides());
+      }
+
+      // Google_Workspace has no credentials of its own — it fetches a live
+      // access token from the main process's token broker on every call.
+      if (config.name === 'Google_Workspace' || config.name === 'Google Workspace') {
+        Object.assign(config.env ?? (config.env = {}), await this.getGoogleWorkspaceEnvOverrides());
       }
 
       // Get environment variables before resolving npx so Windows can prefer a
@@ -887,6 +996,7 @@ export class MCPManager {
         OPENAI_ACCOUNT_ID: env.OPENAI_ACCOUNT_ID?.trim() ? 'set' : 'unset',
         ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY?.trim() ? 'set' : 'unset',
         ANTHROPIC_AUTH_TOKEN: env.ANTHROPIC_AUTH_TOKEN?.trim() ? 'set' : 'unset',
+        GOOGLE_TOKEN_BROKER_SECRET: env.GOOGLE_TOKEN_BROKER_SECRET?.trim() ? 'set' : 'unset',
       });
 
       // In production, set NODE_PATH to include unpacked node_modules
@@ -1283,7 +1393,9 @@ export class MCPManager {
         logError(`[MCPManager]   1. Chrome failed to start`);
         logError(`[MCPManager]   2. Another process is using port 9222`);
         logError(`[MCPManager]   3. Firewall blocking the port`);
-        throw new Error('Chrome 浏览器未就绪，无法执行此操作: debug port did not become ready');
+        throw new Error(
+          'Chrome browser is not ready, cannot perform this operation: debug port did not become ready'
+        );
       }
 
       log(`[MCPManager] ✓ Chrome debug port is now ready`);
@@ -1312,7 +1424,7 @@ export class MCPManager {
             logError(`[MCPManager] Last error code: ${ve.code}, message: ${ve.message}`);
             logError(`[MCPManager] The chrome-devtools-mcp server may not be working correctly`);
             throw new Error(
-              'Chrome 浏览器未就绪，无法执行此操作: MCP connection verification failed after 5 attempts'
+              'Chrome browser is not ready, cannot perform this operation: MCP connection verification failed after 5 attempts'
             );
           }
         }
@@ -1321,7 +1433,7 @@ export class MCPManager {
       logError(`[MCPManager] ❌ Failed to start Chrome with debugging`);
       const startErrMsg = startError instanceof Error ? startError.message : String(startError);
       logError(`[MCPManager] Error: ${startErrMsg}`);
-      throw new Error(`Chrome 浏览器未就绪，无法执行此操作: ${startErrMsg}`);
+      throw new Error(`Chrome browser is not ready, cannot perform this operation: ${startErrMsg}`);
     }
   }
 
@@ -1681,7 +1793,7 @@ export class MCPManager {
         }
 
         logTiming(`MCP tool ${actualToolName}`, callStartTime);
-        return result;
+        return truncateOversizedToolResult(result);
       } catch (error: unknown) {
         lastError = error;
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1861,6 +1973,56 @@ export function mergeShellEnvForMcp(
     }
   }
   return merged;
+}
+
+// Some MCP tools (e.g. browser-automation "take a full page snapshot" tools)
+// return an unfiltered accessibility-tree dump with no size limit — a single
+// real-world page can return 100,000+ characters of mostly-irrelevant DOM
+// structure. Feeding that whole block into the model's context right before
+// its next decision has been observed to derail agentic reasoning across
+// every provider tested (local and cloud alike), not because the context
+// window overflows, but because that much low-signal noise in one turn makes
+// it hard for any model to stay anchored on the actual task. This caps any
+// oversized text content block from ANY MCP server before it reaches the
+// agent — general, not tied to a specific tool or server name.
+export const MAX_TOOL_RESULT_TEXT_LENGTH = 20000;
+
+export function truncateOversizedToolResult(result: unknown): unknown {
+  if (!result || typeof result !== 'object' || !('content' in result)) {
+    return result;
+  }
+  const content = (result as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return result;
+  }
+
+  let truncatedAny = false;
+  const nextContent = content.map((block) => {
+    if (
+      block &&
+      typeof block === 'object' &&
+      (block as { type?: unknown }).type === 'text' &&
+      typeof (block as { text?: unknown }).text === 'string'
+    ) {
+      const text = (block as { text: string }).text;
+      if (text.length > MAX_TOOL_RESULT_TEXT_LENGTH) {
+        truncatedAny = true;
+        const omitted = text.length - MAX_TOOL_RESULT_TEXT_LENGTH;
+        return {
+          ...block,
+          text:
+            text.slice(0, MAX_TOOL_RESULT_TEXT_LENGTH) +
+            `\n\n[...truncated, ${omitted} more characters. This result was too large to include in full — use a more targeted query, filter, or a follow-up tool call to narrow it down instead of requesting the full content again.]`,
+        };
+      }
+    }
+    return block;
+  });
+
+  if (!truncatedAny) {
+    return result;
+  }
+  return { ...(result as Record<string, unknown>), content: nextContent };
 }
 
 function extractStructuredToolErrorMessage(result: unknown): string {

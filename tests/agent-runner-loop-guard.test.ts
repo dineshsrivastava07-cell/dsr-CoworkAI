@@ -7,6 +7,7 @@ import {
   buildHaltSteerMessage,
   buildWarnSteerMessage,
   messageCallsHash,
+  messageToolNamesKey,
   stableToolKey,
   type ToolCallDescriptor,
 } from '../src/main/agent/agent-runner-loop-guard';
@@ -218,7 +219,90 @@ describe('LoopGuard layer 1 — hash-based group detection (streak semantics)', 
   });
 });
 
-describe('LoopGuard layer 2 — per-tool frequency detection', () => {
+describe('LoopGuard layer 2 — tool-name-only streak (args ignored)', () => {
+  const buildCall = (name: string, input: Record<string, unknown>): ToolCallDescriptor => ({
+    name,
+    input,
+  });
+
+  it('reproduces the reported browser-loop scenario: same tool, different URL each time', () => {
+    // The exact failure mode reported by the user: new_page called repeatedly
+    // with a different target URL on every retry. messageCallsHash would never
+    // repeat here because the args differ — this layer must catch it anyway.
+    const guard = new LoopGuard();
+    const urls = [
+      'https://amazon.co.in',
+      'https://amazon.in',
+      'https://www.amazon.in/dp/xyz',
+      'https://www.google.com/search?q=amazon+in',
+      'https://amazon.in/gp/bestsellers',
+      'https://www.amazon.in',
+      'https://www.bitcoin.org',
+    ];
+    const actions = urls
+      .map((url) => [buildCall('new_page', { url })])
+      .map((g) => guard.recordAssistantMessage(g).action);
+
+    expect(actions[0]).toBe('none');
+    expect(actions[1]).toBe('none');
+    expect(actions[2]).toBe('none');
+    expect(actions[3]).toBe('name_warn');
+    expect(actions[4]).toBe('none');
+    expect(actions[5]).toBe('none');
+    expect(actions[6]).toBe('name_halt');
+  });
+
+  it('does not fire when the hash layer already caught an identical-args streak', () => {
+    // Identical args every time — the hash layer (lower thresholds) must win,
+    // and the name-only layer must never also fire for the same message.
+    const guard = new LoopGuard();
+    const group = [buildCall('bash', { command: 'echo hi' })];
+    const actions = Array.from({ length: 6 }, () => guard.recordAssistantMessage(group).action);
+    expect(actions).toEqual(['none', 'none', 'hash_warn', 'none', 'hash_halt', 'none']);
+    expect(actions).not.toContain('name_warn');
+  });
+
+  it('a change in the tool-name sequence resets the name-only streak', () => {
+    const guard = new LoopGuard();
+    const newPage = (url: string) => [buildCall('new_page', { url })];
+    const listPages = [buildCall('list_pages', {})];
+
+    expect(guard.recordAssistantMessage(newPage('https://a.com')).action).toBe('none');
+    expect(guard.recordAssistantMessage(newPage('https://b.com')).action).toBe('none');
+    expect(guard.recordAssistantMessage(newPage('https://c.com')).action).toBe('none');
+    expect(guard.recordAssistantMessage(listPages).action).toBe('none');
+    // Streak restarts — needs 4 more in a row before warning again.
+    expect(guard.recordAssistantMessage(newPage('https://d.com')).action).toBe('none');
+    expect(guard.recordAssistantMessage(newPage('https://e.com')).action).toBe('none');
+    expect(guard.recordAssistantMessage(newPage('https://f.com')).action).toBe('none');
+    expect(guard.recordAssistantMessage(newPage('https://g.com')).action).toBe('name_warn');
+  });
+
+  it('exact duplicate calls within a varying-args streak pause rather than reset it', () => {
+    const guard = new LoopGuard();
+    const newPage = (url: string) => [buildCall('new_page', { url })];
+
+    expect(guard.recordAssistantMessage(newPage('https://a.com')).action).toBe('none'); // streak=1
+    expect(guard.recordAssistantMessage(newPage('https://a.com')).action).toBe('none'); // dup, owned by hash layer, streak stays 1
+    expect(guard.recordAssistantMessage(newPage('https://b.com')).action).toBe('none'); // streak=2
+    expect(guard.recordAssistantMessage(newPage('https://c.com')).action).toBe('none'); // streak=3
+    expect(guard.recordAssistantMessage(newPage('https://d.com')).action).toBe('name_warn'); // streak=4
+  });
+
+  it('messageToolNamesKey ignores arguments entirely', () => {
+    const a = messageToolNamesKey([buildCall('new_page', { url: 'https://a.com' })]);
+    const b = messageToolNamesKey([buildCall('new_page', { url: 'https://b.com' })]);
+    expect(a).toBe(b);
+  });
+
+  it('messageToolNamesKey distinguishes different tool sequences', () => {
+    const a = messageToolNamesKey([buildCall('new_page', {}), buildCall('navigate_page', {})]);
+    const b = messageToolNamesKey([buildCall('navigate_page', {}), buildCall('new_page', {})]);
+    expect(a).not.toBe(b);
+  });
+});
+
+describe('LoopGuard layer 3 — per-tool frequency detection', () => {
   it('per-tool counters are independent across tool names', () => {
     const guard = new LoopGuard();
     for (let i = 0; i < 29; i++) guard.recordToolInvocation('read_file');
@@ -237,6 +321,56 @@ describe('LoopGuard layer 2 — per-tool frequency detection', () => {
     expect(guard.recordToolInvocation('x').action).toBe('freq_warn');
     expect(guard.recordToolInvocation('x').action).toBe('freq_halt');
     expect(guard.recordToolInvocation('x').action).toBe('freq_abort');
+  });
+});
+
+describe('LoopGuard layer 4 — permission-denial tracking', () => {
+  it('reproduces the reported scenario: the agent keeps proposing tools despite repeated denials', () => {
+    const guard = new LoopGuard();
+    expect(guard.recordPermissionDenial().action).toBe('none');
+    expect(guard.recordPermissionDenial().action).toBe('permission_denial_warn');
+    const third = guard.recordPermissionDenial();
+    expect(third.action).toBe('permission_denial_abort');
+    expect(third.count).toBe(3);
+    expect(guard.wasAbortedByPermissionDenial()).toBe(true);
+  });
+
+  it('counts denials of different tools the same as denials of the same tool', () => {
+    // The real failure denies a different tool every time (navigate_page, then
+    // new_page, then spawn_subagent, ...) — the counter must not require the
+    // same tool name to accumulate.
+    const guard = new LoopGuard();
+    guard.recordPermissionDenial();
+    guard.recordPermissionDenial();
+    const third = guard.recordPermissionDenial();
+    expect(third.action).toBe('permission_denial_abort');
+  });
+
+  it('resets the streak when a tool call is allowed', () => {
+    const guard = new LoopGuard();
+    guard.recordPermissionDenial();
+    guard.recordPermissionAllow();
+    expect(guard.recordPermissionDenial().action).toBe('none');
+    expect(guard.recordPermissionDenial().action).toBe('permission_denial_warn');
+    expect(guard.wasAbortedByPermissionDenial()).toBe(false);
+  });
+
+  it('only fires the abort decision once even if denials keep accumulating', () => {
+    const guard = new LoopGuard();
+    guard.recordPermissionDenial();
+    guard.recordPermissionDenial();
+    expect(guard.recordPermissionDenial().action).toBe('permission_denial_abort');
+    expect(guard.recordPermissionDenial().action).toBe('none');
+    expect(guard.recordPermissionDenial().action).toBe('none');
+  });
+
+  it('honours custom thresholds via constructor', () => {
+    const guard = new LoopGuard({
+      permissionDenialWarnThreshold: 1,
+      permissionDenialAbortThreshold: 2,
+    });
+    expect(guard.recordPermissionDenial().action).toBe('permission_denial_warn');
+    expect(guard.recordPermissionDenial().action).toBe('permission_denial_abort');
   });
 });
 
@@ -261,6 +395,27 @@ describe('Message builders', () => {
     expect(abortHash).toContain('Loop Guard');
     expect(abortHash).toContain('Thinking');
   });
+
+  it('permission-denial warn/abort messages are clear about what happened, without the generic loop guidance', () => {
+    const warn = buildWarnSteerMessage({
+      action: 'permission_denial_warn',
+      reason: 'x',
+      count: 2,
+    });
+    expect(warn).toContain('2');
+    expect(warn).toContain('denied');
+
+    const abort = buildAbortUserMessage({
+      action: 'permission_denial_abort',
+      reason: 'x',
+      count: 3,
+    });
+    expect(abort).toContain('3');
+    expect(abort).toContain('denied');
+    // Should invite the user to redirect, not suggest switching models/thinking
+    // mode — that guidance is about model-quality loops, not user pushback.
+    expect(abort).not.toContain('Thinking');
+  });
 });
 
 describe('DEFAULT_LOOP_GUARD_CONFIG', () => {
@@ -273,5 +428,8 @@ describe('DEFAULT_LOOP_GUARD_CONFIG', () => {
     expect(DEFAULT_LOOP_GUARD_CONFIG.toolFrequencyHaltThreshold).toBe(50);
     expect(DEFAULT_LOOP_GUARD_CONFIG.toolFrequencyAbortThreshold).toBe(80);
     expect(DEFAULT_LOOP_GUARD_CONFIG.readFileLineBucketSize).toBe(200);
+    expect(DEFAULT_LOOP_GUARD_CONFIG.toolNameStreakWarnThreshold).toBe(4);
+    expect(DEFAULT_LOOP_GUARD_CONFIG.toolNameStreakHaltThreshold).toBe(7);
+    expect(DEFAULT_LOOP_GUARD_CONFIG.toolNameStreakAbortThreshold).toBe(12);
   });
 });

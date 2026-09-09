@@ -10,7 +10,13 @@ import { log, logError } from '../utils/logger';
  * Preset MCP Server Configurations
  * These are common MCP servers that users can quickly add
  */
-export const MCP_SERVER_PRESETS: Record<string, Omit<MCPServerConfig, 'id' | 'enabled'> & { requiresEnv?: string[]; envDescription?: Record<string, string> }> = {
+export const MCP_SERVER_PRESETS: Record<
+  string,
+  Omit<MCPServerConfig, 'id' | 'enabled'> & {
+    requiresEnv?: string[];
+    envDescription?: Record<string, string>;
+  }
+> = {
   chrome: {
     name: 'Chrome',
     type: 'stdio',
@@ -56,7 +62,34 @@ export const MCP_SERVER_PRESETS: Record<string, Omit<MCPServerConfig, 'id' | 'en
       // No environment variables required
     },
   },
+  'office-tools': {
+    name: 'Office_Tools',
+    type: 'stdio',
+    command: 'node',
+    args: ['{OFFICE_TOOLS_SERVER_PATH}'], // Path will be resolved at runtime (compiled JS in production)
+    env: {},
+    requiresEnv: [],
+    envDescription: {
+      // No environment variables required
+    },
+  },
+  'google-workspace': {
+    name: 'Google_Workspace',
+    type: 'stdio',
+    command: 'node',
+    args: ['{GOOGLE_WORKSPACE_SERVER_PATH}'], // Path will be resolved at runtime (compiled JS in production)
+    env: {},
+    requiresEnv: [],
+    envDescription: {
+      // No environment variables required — token broker port/secret are
+      // injected transiently at spawn time by mcp-manager.ts, never persisted here.
+    },
+  },
 };
+
+function isOfficeToolsServerName(name: string): boolean {
+  return name === 'Office_Tools' || name === 'Office Tools';
+}
 
 /**
  * MCP Server Configuration Store
@@ -97,13 +130,13 @@ class MCPConfigStore {
   saveServer(config: MCPServerConfig): void {
     const servers = this.getServers();
     const index = servers.findIndex((s) => s.id === config.id);
-    
+
     if (index >= 0) {
       servers[index] = config;
     } else {
       servers.push(config);
     }
-    
+
     this.store.set('servers', servers);
   }
 
@@ -127,7 +160,15 @@ class MCPConfigStore {
    * Get enabled servers only
    */
   getEnabledServers(): MCPServerConfig[] {
-    return this.getServers().filter((s) => s.enabled);
+    const servers = this.getServers();
+    const enabledServers = servers.filter((s) => s.enabled);
+    const hasOfficeToolsConfig = servers.some((server) => isOfficeToolsServerName(server.name));
+
+    if (!hasOfficeToolsConfig) {
+      enabledServers.push(this.createBuiltinOfficeToolsConfig());
+    }
+
+    return enabledServers;
   }
 
   /**
@@ -141,7 +182,6 @@ class MCPConfigStore {
    * Get the path to a MCP server file in the mcp directory
    */
   private getMcpServerPath(filename: string): string | null {
-
     // In development: __dirname points to dist-electron/main
     // In production: appPath points to the app.asar or unpacked app
     if (app.isPackaged) {
@@ -158,6 +198,18 @@ class MCPConfigStore {
       } catch {
         // Fall through to development path
       }
+    }
+
+    // Vitest can import this TypeScript module directly, where __dirname is already
+    // src/main/mcp rather than dist-electron/main.
+    const sameDirSourcePath = path.join(__dirname, filename);
+    try {
+      if (fs.existsSync(sameDirSourcePath)) {
+        log(`[MCPConfigStore] MCP Server path resolved (${filename}):`, sameDirSourcePath);
+        return sameDirSourcePath;
+      }
+    } catch {
+      // Fall through to dist-electron-style development path.
     }
 
     // Development: __dirname is dist-electron/main
@@ -211,6 +263,32 @@ class MCPConfigStore {
   }
 
   /**
+   * Get the path to the Office Tools MCP server file
+   */
+  private getOfficeToolsServerPath(): string | null {
+    return this.getMcpServerPath('office-tools-server.ts');
+  }
+
+  /**
+   * Get the path to the Google Workspace MCP server file
+   */
+  private getGoogleWorkspaceServerPath(): string | null {
+    return this.getMcpServerPath('google-workspace-server.ts');
+  }
+
+  private createBuiltinOfficeToolsConfig(): MCPServerConfig {
+    const preset = MCP_SERVER_PRESETS['office-tools'];
+    return {
+      ...preset,
+      args: preset.args?.map((arg) =>
+        arg === '{OFFICE_TOOLS_SERVER_PATH}' ? this.getOfficeToolsServerPath() || arg : arg
+      ),
+      id: 'mcp-office-tools-builtin',
+      enabled: true,
+    };
+  }
+
+  /**
    * Create a server config from a preset
    */
   createFromPreset(presetKey: string, enabled: boolean = false): MCPServerConfig | null {
@@ -225,7 +303,7 @@ class MCPConfigStore {
     if (preset.args) {
       resolvedPreset = {
         ...preset,
-        args: preset.args.map(arg => {
+        args: preset.args.map((arg) => {
           // Software Development server path
           if (arg === '{SOFTWARE_DEV_SERVER_PATH}') {
             return this.getSoftwareDevServerPath() || arg;
@@ -233,6 +311,12 @@ class MCPConfigStore {
           // GUI Operate server path
           if (arg === '{GUI_OPERATE_SERVER_PATH}') {
             return this.getGuiOperateServerPath() || arg;
+          }
+          if (arg === '{OFFICE_TOOLS_SERVER_PATH}') {
+            return this.getOfficeToolsServerPath() || arg;
+          }
+          if (arg === '{GOOGLE_WORKSPACE_SERVER_PATH}') {
+            return this.getGoogleWorkspaceServerPath() || arg;
           }
           return arg;
         }),

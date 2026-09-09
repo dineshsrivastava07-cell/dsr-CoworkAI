@@ -132,6 +132,26 @@ export interface WeeklyScheduleConfig {
 
 export type ScheduleConfig = DailyScheduleConfig | WeeklyScheduleConfig;
 
+// Reactive scheduling (watch tasks): poll a condition and only fire when it changes.
+export type WatchCheckType = 'http' | 'command';
+
+export interface WatchHttpCheckConfig {
+  url: string;
+  method?: 'GET' | 'HEAD';
+}
+
+export interface WatchCommandCheckConfig {
+  command: string;
+  args?: string[];
+}
+
+export interface WatchConfig {
+  checkType: WatchCheckType;
+  http?: WatchHttpCheckConfig;
+  command?: WatchCommandCheckConfig;
+  pollIntervalMs: number;
+}
+
 export interface ScheduleTask {
   id: string;
   title: string;
@@ -143,7 +163,11 @@ export interface ScheduleTask {
   repeatEvery: number | null;
   repeatUnit: ScheduleRepeatUnit | null;
   enabled: boolean;
+  watchConfig: WatchConfig | null;
+  lastCheckedState: string | null;
+  lastCheckedAt: number | null;
   lastRunAt: number | null;
+  lastRunSessionAt: string | null;
   lastRunSessionId: string | null;
   lastError: string | null;
   createdAt: number;
@@ -160,6 +184,7 @@ export interface ScheduleCreateInput {
   repeatEvery?: number | null;
   repeatUnit?: ScheduleRepeatUnit | null;
   enabled?: boolean;
+  watchConfig?: WatchConfig | null;
 }
 
 export interface ScheduleUpdateInput {
@@ -172,6 +197,9 @@ export interface ScheduleUpdateInput {
   repeatEvery?: number | null;
   repeatUnit?: ScheduleRepeatUnit | null;
   enabled?: boolean;
+  watchConfig?: WatchConfig | null;
+  lastCheckedState?: string | null;
+  lastCheckedAt?: number | null;
   lastRunAt?: number | null;
   lastRunSessionId?: string | null;
   lastError?: string | null;
@@ -606,6 +634,7 @@ export interface Settings {
   globalSkillsPath: string;
   memoryStrategy: 'auto' | 'manual' | 'rolling';
   maxContextTokens: number;
+  autoApproveTools: boolean;
 }
 
 // Tool types
@@ -718,6 +747,14 @@ export interface AppConfig {
   memoryEnabled?: boolean;
   memoryRuntime?: MemoryRuntimeConfig;
   enableThinking?: boolean;
+  /**
+   * Autonomous Mode: when true, tool calls that would otherwise show a
+   * permission dialog and wait (up to 60s) for a click are auto-approved
+   * instead. Does not override explicit 'deny' rules, and does not bypass
+   * tool-level safety checks that are independent of the permission system
+   * (e.g. GUI_Operate's irreversible-click confirmation).
+   */
+  autoApproveTools?: boolean;
   isConfigured: boolean;
 }
 

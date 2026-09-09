@@ -12,7 +12,7 @@ Open Cowork is a free, open-source desktop application that provides a local AI 
 - Built-in Skills system for generating PPTX, DOCX, XLSX, PDF documents
 - MCP (Model Context Protocol) tool integration — browser, Notion, desktop apps
 - GUI automation via computer use (recommended model: Gemini-3-Pro)
-- Remote control through Feishu (Lark) and Slack
+- Remote desktop coordination through India-focused VNC/support tooling and Slack
 - Real-time trace panel for AI reasoning and tool execution
 - Custom skill creation and management via skill-creator toolkit
 
@@ -51,7 +51,7 @@ Download from: https://github.com/OpenCoworkAI/open-cowork/releases
 Open Cowork is a free, open-source desktop application that provides a local AI agent workspace. It wraps AI models (Claude, GPT, Gemini, DeepSeek, etc.) into a GUI with one-click installers for Windows and macOS — no terminal or coding knowledge required.
 
 ### How is Open Cowork different from Claude Cowork?
-Open Cowork is the open-source implementation of Claude Cowork. It adds multi-model support (not just Claude), GUI automation via computer use, remote control through Feishu/Slack, and VM-level sandbox isolation.
+Open Cowork adds multi-model support, GUI automation via computer use, remote desktop coordination through India-focused support tooling, Slack integration, and VM-level sandbox isolation.
 
 ### What AI models does Open Cowork support?
 Claude (via Anthropic or OpenRouter), OpenAI-compatible APIs, and Chinese models including GLM (Zhipu AI), MiniMax, and Kimi. Any provider offering an OpenAI-compatible API endpoint can be configured.

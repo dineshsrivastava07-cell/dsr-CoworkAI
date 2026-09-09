@@ -126,6 +126,13 @@ export interface AppConfig {
   // Enable thinking mode (show thinking steps)
   enableThinking: boolean;
 
+  // Autonomous Mode: auto-approve tool calls that would otherwise show a
+  // permission dialog, instead of waiting up to 60s for a click. Does not
+  // override explicit 'deny' rules or tool-level safety checks that are
+  // independent of the permission system (e.g. GUI_Operate's
+  // irreversible-click confirmation).
+  autoApproveTools: boolean;
+
   // First run flag
   isConfigured: boolean;
 }
@@ -172,6 +179,7 @@ const DIRECT_READ_KEYS = new Set<keyof AppConfig>([
   'sandboxEnabled',
   'memoryEnabled',
   'enableThinking',
+  'autoApproveTools',
   'isConfigured',
 ]);
 
@@ -204,6 +212,7 @@ export const FIELD_VALIDATORS: Record<string, (v: unknown) => boolean> = {
   enableDevLogs: (v) => typeof v === 'boolean',
   sandboxEnabled: (v) => typeof v === 'boolean',
   enableThinking: (v) => typeof v === 'boolean',
+  autoApproveTools: (v) => typeof v === 'boolean',
   memoryEnabled: (v) => typeof v === 'boolean',
   model: (v) => typeof v === 'string',
   provider: (v) =>
@@ -315,6 +324,7 @@ const defaultConfig: AppConfig = {
     promptIterationRounds: 2,
   },
   enableThinking: false,
+  autoApproveTools: false,
   isConfigured: false,
 };
 
@@ -1018,6 +1028,7 @@ export class ConfigStore {
       memoryEnabled: toBoolean(raw.memoryEnabled, defaultConfig.memoryEnabled),
       memoryRuntime: normalizeMemoryRuntimeConfig(raw.memoryRuntime),
       enableThinking: projected.enableThinking,
+      autoApproveTools: toBoolean(raw.autoApproveTools, defaultConfig.autoApproveTools),
       isConfigured: toBoolean(raw.isConfigured, defaultConfig.isConfigured),
     };
     this.normalizeModelIds(result);
@@ -1158,6 +1169,7 @@ export class ConfigStore {
             key === 'sandboxEnabled' ||
             key === 'memoryEnabled' ||
             key === 'enableThinking' ||
+            key === 'autoApproveTools' ||
             key === 'isConfigured') &&
           typeof rawValue !== 'boolean'
         ) {
@@ -1436,6 +1448,10 @@ export class ConfigStore {
         updates.memoryRuntime !== undefined
           ? normalizeMemoryRuntimeConfig(updates.memoryRuntime)
           : current.memoryRuntime,
+      autoApproveTools:
+        updates.autoApproveTools !== undefined
+          ? updates.autoApproveTools
+          : current.autoApproveTools,
       isConfigured:
         updates.isConfigured !== undefined ? updates.isConfigured : current.isConfigured,
     });

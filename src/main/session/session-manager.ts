@@ -100,6 +100,11 @@ export class SessionManager {
   private sandboxInitPromises: Map<string, Promise<void>> = new Map();
   private sessionTitleAttempts: Set<string> = new Set();
   private titleGenerationTokens: Map<string, symbol> = new Map();
+  // Sessions started by ScheduledTaskManager (unattended — nobody is present
+  // to click a permission dialog). Tracked so requestPermission can fail fast
+  // instead of burning the full 60s timeout waiting for a response that will
+  // never come.
+  private scheduledSessionIds: Set<string> = new Set();
   private messageCache: Map<string, Message[]> = new Map();
   private static readonly MAX_CACHE_SIZE = 100;
 
@@ -163,6 +168,16 @@ export class SessionManager {
       undefined,
       this.extensionManager
     );
+  }
+
+  /**
+   * Mark a session as originating from a scheduled task (unattended trigger,
+   * not a live user in the GUI). Call right after startSession() for a
+   * scheduled run. Affects only how requestPermission times out — rule-based
+   * decisions (allow/deny from saved permission rules) are unaffected.
+   */
+  markSessionScheduled(sessionId: string): void {
+    this.scheduledSessionIds.add(sessionId);
   }
 
   /**
@@ -1242,12 +1257,21 @@ export class SessionManager {
     toolName: string,
     input: Record<string, unknown>
   ): Promise<PermissionResult> {
+    // Scheduled/unattended sessions have nobody present to answer a dialog —
+    // waiting the full timeout just stalls the run for no benefit. Still
+    // surface the request/dismiss events (visible if someone happens to be
+    // looking at that session) but resolve 'deny' almost immediately instead
+    // of after 60s. Rule-based auto-allow (decidePermission) already runs
+    // before this point, so previously-approved tools are unaffected.
+    const isScheduled = this.scheduledSessionIds.has(sessionId);
+    const timeoutMs = isScheduled ? 500 : 60_000;
+
     return new Promise((resolve) => {
       const timeoutId = setTimeout(() => {
         this.pendingPermissions.delete(toolUseId);
         resolve('deny');
         this.sendToRenderer({ type: 'permission.dismiss', payload: { toolUseId } });
-      }, 60_000);
+      }, timeoutMs);
       this.pendingPermissions.set(toolUseId, (result: PermissionResult) => {
         clearTimeout(timeoutId);
         resolve(result);

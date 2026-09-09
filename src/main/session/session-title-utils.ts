@@ -40,11 +40,6 @@ export function buildTitlePrompt(prompt: string): string {
     '- Reply in the same language as the user request',
     '- No quotes, numbering, or punctuation at the end',
     '',
-    '请根据用户请求生成一个简短的对话标题：',
-    '- 不超过15个字',
-    '- 同语言输出',
-    '- 不要加引号或编号',
-    '',
-    `User request / 用户请求：${prompt.trim()}`,
+    `User request: ${prompt.trim()}`,
   ].join('\n');
 }

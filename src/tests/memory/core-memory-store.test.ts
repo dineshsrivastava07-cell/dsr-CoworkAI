@@ -20,12 +20,12 @@ describe('CoreMemoryStore', () => {
   it('keeps newly applied memories when the store is at capacity', () => {
     const store = new CoreMemoryStore(filePath, 2);
     store.applyActions([
-      { op: 'upsert', category: 'preferences', key: 'language', value: '中文' },
-      { op: 'upsert', category: 'skills', key: 'typescript', value: '熟悉 TypeScript' },
+      { op: 'upsert', category: 'preferences', key: 'language', value: 'English' },
+      { op: 'upsert', category: 'skills', key: 'typescript', value: 'Comfortable with TypeScript' },
     ]);
 
     store.applyActions([
-      { op: 'upsert', category: 'interests', key: 'memory', value: '关注 memory 系统' },
+      { op: 'upsert', category: 'interests', key: 'memory', value: 'Interested in memory systems' },
     ]);
 
     const keys = store.getEntries().map((entry) => entry.combinedKey);

@@ -36,6 +36,31 @@ const servers = [
     entry: 'office-tools-server.ts',
     description: 'Office Tools MCP Server (Excel, Word, PowerPoint)',
   },
+  {
+    name: 'ocr-tools-server',
+    entry: 'ocr-tools-server.ts',
+    description: 'OCR Tools MCP Server (Tesseract, local)',
+    // tesseract.js/tesseract.js-core must stay real on-disk packages (not
+    // bundled into the single output file): the worker thread loads a
+    // sibling .js file by path, and this server locates that path at
+    // runtime via require.resolve, which only works against a real install.
+    extraExternals: ['tesseract.js', 'tesseract.js-core'],
+  },
+  {
+    name: 'weather-tools-server',
+    entry: 'weather-tools-server.ts',
+    description: 'Weather Tools MCP Server (Open-Meteo)',
+  },
+  {
+    name: 'google-workspace-server',
+    entry: 'google-workspace-server.ts',
+    description: 'Google Workspace MCP Server (Gmail, Drive, Calendar — read-only)',
+    // pdf-parse has a known module-load-time debug harness that can throw
+    // under certain bundler/CJS-wrapper shapes when esbuild inlines it — keep
+    // it a real on-disk package (same mitigation tesseract.js needed above,
+    // different underlying reason) and dynamic-import it at call time.
+    extraExternals: ['pdf-parse'],
+  },
 ];
 
 const NODE_EXTERNALS = [
@@ -221,7 +246,7 @@ async function bundleWithEsbuild() {
       platform: 'node',
       target: 'node20',
       format: 'cjs',
-      external: NODE_EXTERNALS,
+      external: server.extraExternals ? [...NODE_EXTERNALS, ...server.extraExternals] : NODE_EXTERNALS,
       sourcemap: false,
       minify: false,
       logLevel: 'warning',

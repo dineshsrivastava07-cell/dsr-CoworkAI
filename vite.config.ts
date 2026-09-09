@@ -43,7 +43,6 @@ export default defineConfig({
                 // NOTE: ESM-only packages (@mariozechner/pi-coding-agent, pi-ai, electron-store, uuid)
                 // must stay bundled — CJS require() can't load them
                 '@anthropic-ai/sdk',
-                '@larksuiteoapi/node-sdk',
                 'openai',
                 ...mcpExternals,
                 'electron-updater',

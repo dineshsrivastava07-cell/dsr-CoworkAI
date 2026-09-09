@@ -30,6 +30,20 @@ export interface GatewayConfig {
 
   /** Auto-approve safe tools without user confirmation */
   autoApproveSafeTools?: boolean;
+
+  /** India-focused remote desktop/VNC provider configuration */
+  indianVnc?: IndianVncConfig;
+}
+
+export interface IndianVncConfig {
+  enabled: boolean;
+  provider: 'zoho-assist' | 'manageengine-remote-access-plus';
+  portalUrl?: string;
+  organizationId?: string;
+  operatorEmail?: string;
+  accessMode: 'attended' | 'unattended';
+  requireUserConsent: boolean;
+  auditLogging: boolean;
 }
 
 export interface GatewayAuthConfig {
@@ -77,14 +91,7 @@ export interface TunnelConfig {
 // Channel Configuration
 // ============================================================================
 
-export type ChannelType =
-  | 'feishu'
-  | 'wechat'
-  | 'telegram'
-  | 'dingtalk'
-  | 'websocket'
-  | 'slack'
-  | 'stdio';
+export type ChannelType = 'wechat' | 'telegram' | 'dingtalk' | 'websocket' | 'slack' | 'stdio';
 
 export interface ChannelConfig {
   /** Channel type */
@@ -95,57 +102,11 @@ export interface ChannelConfig {
 
   /** Channel-specific configuration */
   config:
-    | FeishuChannelConfig
     | WechatChannelConfig
     | TelegramChannelConfig
     | DingtalkChannelConfig
     | WebSocketChannelConfig
     | SlackChannelConfig;
-}
-
-// Feishu (飞书) Channel
-export interface FeishuChannelConfig {
-  type: 'feishu';
-
-  /** App ID from Feishu Open Platform */
-  appId: string;
-
-  /** App Secret from Feishu Open Platform */
-  appSecret: string;
-
-  /** Verification token for webhook validation */
-  verificationToken?: string;
-
-  /** Encrypt key for message encryption */
-  encryptKey?: string;
-
-  /** Use WebSocket mode instead of webhook (recommended for local dev) */
-  useWebSocket?: boolean;
-
-  /** Direct message policy */
-  dm: {
-    /** Policy for handling DMs from unknown users */
-    policy: 'open' | 'pairing' | 'allowlist';
-
-    /** Allowed user open_ids (when policy is 'allowlist') */
-    allowFrom?: string[];
-  };
-
-  /** Group configuration */
-  groups?: {
-    [chatId: string]: {
-      /** Whether to require @mention to activate */
-      requireMention: boolean;
-
-      /** Allowed users in this group */
-      allowFrom?: string[];
-    };
-  };
-
-  /** Default group settings (when not specified per-group) */
-  defaultGroupSettings?: {
-    requireMention: boolean;
-  };
 }
 
 // WeChat Channel (via wechaty)
@@ -558,7 +519,6 @@ export interface GatewayStatus {
 export interface RemoteConfig {
   gateway: GatewayConfig;
   channels: {
-    feishu?: FeishuChannelConfig;
     wechat?: WechatChannelConfig;
     telegram?: TelegramChannelConfig;
     dingtalk?: DingtalkChannelConfig;

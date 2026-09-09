@@ -28,6 +28,7 @@ writeMCPLog('Imported MCP SDK modules', 'Bootstrap');
 
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
+import { createHash } from 'crypto';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -115,6 +116,51 @@ let clickHistory: ClickHistoryEntry[] = [];
 let clickHistoryCounter = 0;
 let currentAppName: string = '';
 let lastClickEntry: ClickHistoryEntry | null = null; // Track the most recent click for success verification
+
+// ─── Safety: emergency stop, irreversible-action gating, app denylist ────────
+// Halt-before-next-action flag set by the `emergency_stop` tool. Any single
+// already-dispatched OS command is still bounded by executeCommandSafe's own
+// exec timeout (default 30s) — this flag stops the *next* action from firing,
+// which is what matters for an agent mid-chain of clicks.
+let emergencyStopActive = false;
+
+const IRREVERSIBLE_INTENT_PATTERN =
+  /\b(send|submit|delete|remove|purchase|buy|pay|checkout|confirm|sign|approve|publish|post|share|delete\s*account|unsubscribe)\b/i;
+
+/** Best-effort classifier: only meaningful when the enough caller supplies an `intent` description. */
+function isLikelyIrreversible(intent: string | undefined): boolean {
+  if (!intent) return false;
+  return IRREVERSIBLE_INTENT_PATTERN.test(intent);
+}
+
+const DEFAULT_GUI_DENYLIST_APPS = [
+  '1password',
+  'keychain access',
+  'bitwarden',
+  'lastpass',
+  'dashlane',
+  'system preferences', // contains password/security panes
+];
+
+function getGuiDenylistApps(): string[] {
+  const fromEnv = process.env.GUI_DENYLIST_APPS?.trim();
+  const extra = fromEnv
+    ? fromEnv
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+  return [...DEFAULT_GUI_DENYLIST_APPS, ...extra];
+}
+
+/** Returns the matched denylist term if the frontmost app is deny-listed, else null. macOS only for now. */
+async function checkForegroundAppDenylist(): Promise<string | null> {
+  const frontmost = await getFrontmostMacApplicationName();
+  if (!frontmost) return null;
+  const lowerName = frontmost.toLowerCase();
+  const denylist = getGuiDenylistApps();
+  return denylist.find((term) => lowerName.includes(term)) ?? null;
+}
 
 const APP_NAME_ALIAS_GROUPS: string[][] = [
   ['calendar', '日历'],
@@ -3167,6 +3213,75 @@ async function resolveClickCoordinates(
 }
 
 // ============================================================================
+// Action verification: cheap before/after screen-state check
+// ============================================================================
+// Full-frame content hash of a display, used to detect "did anything change".
+// This is NOT semantic verification (it can't tell you the right thing
+// happened) — use gui_verify_vision for that. It only answers whether the
+// screen visibly changed at all, catching the #1 GUI-agent failure mode of a
+// dispatched action silently doing enough (wrong coordinates, stale window,
+// app not focused).
+const ACTION_SETTLE_MS = 250;
+
+async function hashDisplaySnapshot(displayIndex: number): Promise<string | null> {
+  try {
+    const raw = await takeScreenshot(undefined, displayIndex);
+    const parsed = JSON.parse(raw) as { path?: string };
+    if (!parsed.path) return null;
+    const buf = await fs.readFile(parsed.path);
+    const hash = createHash('sha256').update(buf).digest('hex');
+    fs.unlink(parsed.path).catch(() => {}); // best-effort cleanup of the verification screenshot
+    return hash;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Like hashDisplaySnapshot, but also keeps the captured image as base64 so the
+ * caller can attach it to the tool result instead of discarding it after hashing.
+ */
+async function captureVerificationImage(
+  displayIndex: number
+): Promise<{ hash: string | null; base64: string | null }> {
+  try {
+    const raw = await takeScreenshot(undefined, displayIndex);
+    const parsed = JSON.parse(raw) as { path?: string };
+    if (!parsed.path) return { hash: null, base64: null };
+    const buf = await fs.readFile(parsed.path);
+    const hash = createHash('sha256').update(buf).digest('hex');
+    const base64 = buf.toString('base64');
+    fs.unlink(parsed.path).catch(() => {}); // best-effort cleanup of the verification screenshot
+    return { hash, base64 };
+  } catch {
+    return { hash: null, base64: null };
+  }
+}
+
+/**
+ * Wraps a GUI action with a before/after full-frame hash comparison and
+ * appends the result as a `verification` line so the caller (and the model
+ * reading the tool result) can tell whether the action was a no-op instead of
+ * trusting the OS command's exit code blindly. Also returns the after-action
+ * screenshot as inline image data (when capture succeeds) so the user gets
+ * visible confirmation of what a click/drag/type actually did to the screen,
+ * through the same image content-block path the screenshot tool already uses.
+ */
+async function withActionVerification(
+  displayIndex: number,
+  action: () => Promise<string>
+): Promise<{ text: string; image?: { data: string; mimeType: string } }> {
+  const beforeHash = await hashDisplaySnapshot(displayIndex);
+  const actionResult = await action();
+  await new Promise((resolve) => setTimeout(resolve, ACTION_SETTLE_MS));
+  const after = await captureVerificationImage(displayIndex);
+  const verified = beforeHash !== null && after.hash !== null;
+  const changeDetected = verified ? beforeHash !== after.hash : null;
+  const text = `${actionResult}\nverification: ${JSON.stringify({ verified, changeDetected })}`;
+  return after.base64 ? { text, image: { data: after.base64, mimeType: 'image/png' } } : { text };
+}
+
+// ============================================================================
 // GUI Operation Functions
 // ============================================================================
 
@@ -6118,6 +6233,16 @@ function createMcpServer(): Server {
                 description:
                   'Modifier keys to hold during click: command, shift, option/alt, control/ctrl',
               },
+              intent: {
+                type: 'string',
+                description:
+                  'Short description of what this click does (e.g. "send message", "delete file", "submit order"). STRONGLY RECOMMENDED whenever the click may have an external or hard-to-reverse effect — the tool refuses the call and asks for confirm_irreversible if intent matches send/delete/purchase/submit/pay/sign/confirm/publish/etc.',
+              },
+              confirm_irreversible: {
+                type: 'boolean',
+                description:
+                  'Set true to proceed with a click whose intent was classified as irreversible. Only set this after the current plan/user has actually confirmed the action should happen.',
+              },
             },
             required: ['x', 'y'],
           },
@@ -6148,6 +6273,11 @@ function createMcpServer(): Server {
                 description:
                   'Whether to restore the previous clipboard after pasting (best-effort). Default: true',
               },
+              display_index: {
+                type: 'number',
+                description:
+                  'Display to capture for the after-action verification screenshot. Default: 0 (main display)',
+              },
             },
             required: ['text'],
           },
@@ -6169,6 +6299,11 @@ function createMcpServer(): Server {
                 items: { type: 'string' },
                 description:
                   'Modifier keys (array of strings). Use: "ctrl" for Control, "cmd" for Command, "shift" for Shift, "alt" for Option. Example: ["ctrl"] for Ctrl+C, ["cmd", "shift"] for Cmd+Shift+Key.',
+              },
+              display_index: {
+                type: 'number',
+                description:
+                  'Display index used for before/after screen-change verification (0 = main display). Default: 0',
               },
             },
             required: ['key'],
@@ -6477,6 +6612,25 @@ function createMcpServer(): Server {
             required: [],
           },
         },
+        {
+          name: 'emergency_stop',
+          description:
+            'Immediately halt all further GUI automation (click, type_text, key_press, drag). Any single OS command already in flight still runs to completion (bounded by its own timeout), but no further action is dispatched until resume_automation is called. Use this if the automation appears to be doing the wrong thing.',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: 'resume_automation',
+          description: 'Clear an emergency_stop and allow GUI automation actions to run again.',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+            required: [],
+          },
+        },
       ],
     };
   });
@@ -6489,6 +6643,7 @@ function createMcpServer(): Server {
       writeMCPLog(`[CallTool] name=${name}, args=${JSON.stringify(args ?? {})}`, 'Tool Call');
 
       let result: string;
+      let resultImage: { data: string; mimeType: string } | undefined;
 
       switch (name) {
         case 'get_displays': {
@@ -6498,6 +6653,11 @@ function createMcpServer(): Server {
         }
 
         case 'click': {
+          if (emergencyStopActive) {
+            throw new Error(
+              'GUI automation is emergency-stopped. Call resume_automation before issuing further actions.'
+            );
+          }
           const {
             x,
             y,
@@ -6505,6 +6665,8 @@ function createMcpServer(): Server {
             click_type = 'single',
             modifiers = [],
             coordinate_type = 'auto',
+            intent,
+            confirm_irreversible = false,
           } = args as {
             x: number;
             y: number;
@@ -6512,34 +6674,85 @@ function createMcpServer(): Server {
             click_type?: 'single' | 'double' | 'right' | 'triple';
             modifiers?: string[];
             coordinate_type?: 'auto' | 'absolute' | 'normalized';
+            intent?: string;
+            confirm_irreversible?: boolean;
           };
+          if (isLikelyIrreversible(intent) && !confirm_irreversible) {
+            throw new Error(
+              `Refusing click: intent "${intent}" looks irreversible (send/delete/purchase/submit/etc). ` +
+                `Re-issue this exact call with confirm_irreversible: true if this is intentional.`
+            );
+          }
+          const denylistMatch = await checkForegroundAppDenylist();
+          if (denylistMatch) {
+            throw new Error(
+              `Refusing click: the foreground app matches the GUI denylist ("${denylistMatch}"). ` +
+                `Automation is not permitted over password managers or other sensitive apps.`
+            );
+          }
           const resolved = await resolveClickCoordinates(x, y, display_index, coordinate_type);
-          result = await performClick(resolved.x, resolved.y, display_index, click_type, modifiers);
+          const clickVerification = await withActionVerification(display_index, () =>
+            performClick(resolved.x, resolved.y, display_index, click_type, modifiers)
+          );
+          result = clickVerification.text;
+          resultImage = clickVerification.image;
           break;
         }
 
         case 'type_text': {
+          if (emergencyStopActive) {
+            throw new Error(
+              'GUI automation is emergency-stopped. Call resume_automation before issuing further actions.'
+            );
+          }
+          const denylistMatchForType = await checkForegroundAppDenylist();
+          if (denylistMatchForType) {
+            throw new Error(
+              `Refusing type_text: the foreground app matches the GUI denylist ("${denylistMatchForType}"). ` +
+                `Automation is not permitted over password managers or other sensitive apps.`
+            );
+          }
           const {
             text,
             press_enter = false,
             input_method = 'auto',
             preserve_clipboard = true,
+            display_index: typeDisplayIndex = 0,
           } = args as {
             text: string;
             press_enter?: boolean;
             input_method?: 'auto' | 'keystroke' | 'paste';
             preserve_clipboard?: boolean;
+            display_index?: number;
           };
-          result = await performType(text, press_enter, input_method, preserve_clipboard);
+          const typeVerification = await withActionVerification(typeDisplayIndex, () =>
+            performType(text, press_enter, input_method, preserve_clipboard)
+          );
+          result = typeVerification.text;
+          resultImage = typeVerification.image;
           break;
         }
 
         case 'key_press': {
-          const { key, modifiers = [] } = args as {
+          if (emergencyStopActive) {
+            throw new Error(
+              'GUI automation is after emergency-stopped. Call resume_automation before issuing further actions.'
+            );
+          }
+          const {
+            key,
+            modifiers = [],
+            display_index = 0,
+          } = args as {
             key: string;
             modifiers?: string[];
+            display_index?: number;
           };
-          result = await performKeyPress(key, modifiers);
+          const keyPressVerification = await withActionVerification(display_index, () =>
+            performKeyPress(key, modifiers)
+          );
+          result = keyPressVerification.text;
+          resultImage = keyPressVerification.image;
           break;
         }
 
@@ -6565,6 +6778,11 @@ function createMcpServer(): Server {
         }
 
         case 'drag': {
+          if (emergencyStopActive) {
+            throw new Error(
+              'GUI automation is emergency-stopped. Call resume_automation before issuing further actions.'
+            );
+          }
           const {
             from_x,
             from_y,
@@ -6580,6 +6798,13 @@ function createMcpServer(): Server {
             display_index?: number;
             coordinate_type?: 'auto' | 'absolute' | 'normalized';
           };
+          const denylistMatchForDrag = await checkForegroundAppDenylist();
+          if (denylistMatchForDrag) {
+            throw new Error(
+              `Refusing drag: the foreground app matches the GUI denylist ("${denylistMatchForDrag}"). ` +
+                `Automation is not permitted over password managers or other sensitive apps.`
+            );
+          }
 
           // Use resolveClickCoordinates for consistent coordinate handling
           const fromResolved = await resolveClickCoordinates(
@@ -6595,13 +6820,11 @@ function createMcpServer(): Server {
             coordinate_type
           );
 
-          result = await performDrag(
-            fromResolved.x,
-            fromResolved.y,
-            toResolved.x,
-            toResolved.y,
-            display_index
+          const dragVerification = await withActionVerification(display_index, () =>
+            performDrag(fromResolved.x, fromResolved.y, toResolved.x, toResolved.y, display_index)
           );
+          result = dragVerification.text;
+          resultImage = dragVerification.image;
           break;
         }
 
@@ -6771,6 +6994,21 @@ function createMcpServer(): Server {
           break;
         }
 
+        case 'emergency_stop': {
+          emergencyStopActive = true;
+          result = JSON.stringify({
+            success: true,
+            message: 'GUI automation emergency-stopped. Call resume_automation to continue.',
+          });
+          break;
+        }
+
+        case 'resume_automation': {
+          emergencyStopActive = false;
+          result = JSON.stringify({ success: true, message: 'GUI automation resumed.' });
+          break;
+        }
+
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
@@ -6781,6 +7019,9 @@ function createMcpServer(): Server {
             type: 'text',
             text: result,
           },
+          ...(resultImage
+            ? [{ type: 'image' as const, data: resultImage.data, mimeType: resultImage.mimeType }]
+            : []),
         ],
       };
     } catch (error: unknown) {

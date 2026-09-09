@@ -63,7 +63,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/genai": "^1.44.0",
-    "@larksuiteoapi/node-sdk": "^1.59.0",
     "@mariozechner/pi-ai": "^0.60.0",
     "@mariozechner/pi-coding-agent": "^0.60.0",
     "@modelcontextprotocol/client": "^2.0.0",
@@ -87,6 +86,7 @@
     "ngrok": "^5.0.0-beta.2",
     "openai": "^6.32.0",
     "patch-package": "8.0.1",
+    "pdf-parse": "1.1.4",
     "pptxgenjs": "4.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -96,6 +96,7 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "tesseract.js": "7.0.0",
     "uuid": "^13.0.0",
     "ws": "^8.19.0",
     "zustand": "^5.0.12"
@@ -107,6 +108,7 @@
     "@types/archiver": "^7.0.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^25.6.0",
+    "@types/pdf-parse": "1.1.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/ws": "^8.18.1",

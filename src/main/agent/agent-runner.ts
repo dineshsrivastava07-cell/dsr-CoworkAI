@@ -27,6 +27,10 @@ import type { Session, Message, TraceStep, ServerEvent, ContentBlock } from '../
 import { v4 as uuidv4 } from 'uuid';
 import { decidePermission, rememberAlwaysAllow } from '../config/permission-rules-store';
 import { PathResolver } from '../sandbox/path-resolver';
+import {
+  isLikelyConfirmationFollowUp,
+  findRecentSubstantiveUserPrompt,
+} from './office-doc-followup';
 import { MCPManager } from '../mcp/mcp-manager';
 import { mcpConfigStore } from '../mcp/mcp-config-store';
 import {
@@ -540,7 +544,6 @@ interface CachedPiSession {
   thinkingLevel: string;
   runtimeSignature: string;
   skillsSignature?: string;
-  ollamaNumCtx?: { value: number };
 }
 
 /**
@@ -572,6 +575,11 @@ export class CoworkAgentRunner {
   private extensionManager?: AgentRuntimeExtensionManager;
   private activeControllers: Map<string, AbortController> = new Map();
   private piSessions: Map<string, CachedPiSession> = new Map();
+  // Session-scoped, not per-turn: a fresh LoopGuard per prompt() call would reset all
+  // counters to zero on every user message, which is exactly why a runaway loop
+  // reappeared immediately after the user manually retried. One guard persists for the
+  // whole session and accumulates across turns; cleared in clearSdkSession() below.
+  private loopGuards: Map<string, LoopGuard> = new Map();
   private toolDisplayNameCache: Map<string, string> = new Map();
   private static readonly MAX_CACHED_SESSIONS = 50;
 
@@ -589,6 +597,13 @@ export class CoworkAgentRunner {
     if (/\b(powerpoint|pptx?|presentation|slides|slide deck|deck)\b/.test(lower)) {
       return 'mcp__Office_Tools__create_presentation';
     }
+    if (
+      /\b(wbs|work breakdown structure|work-breakdown structure|project plan|tasks? and sub[- ]?tasks?|task breakdown|implementation plan)\b/.test(
+        lower
+      )
+    ) {
+      return 'mcp__Office_Tools__create_excel';
+    }
     if (/\b(word doc(ument)?|docx?|\.docx|write.*doc|create.*doc|generate.*doc)\b/.test(lower)) {
       return 'mcp__Office_Tools__create_word_document';
     }
@@ -605,10 +620,29 @@ export class CoworkAgentRunner {
     return null;
   }
 
-  /** Extract a referenced filename (e.g. "VMart_Data.xlsx") from the user prompt */
-  private extractReferencedFilename(prompt: string): string | null {
-    const m = prompt.match(/['"]?([^\s'"\\]+\.(xlsx?|docx?|csv|txt|pptx?))['"]?/i);
-    return m ? m[1] : null;
+  /** Extract referenced file paths from the user prompt and attachment metadata. */
+  private extractReferencedFilePaths(prompt: string, cwd?: string): string[] {
+    const refs: string[] = [];
+    const attachmentPathMatches = prompt.matchAll(/\bat path:\s*([^\n\r]+)/gi);
+
+    for (const match of attachmentPathMatches) {
+      const rawPath = match[1]?.trim();
+      if (!rawPath) continue;
+      refs.push(path.isAbsolute(rawPath) ? rawPath : path.resolve(cwd || process.cwd(), rawPath));
+    }
+
+    const filenameMatch = prompt.match(/['"]?([^\s'"\\]+\.(xlsx?|docx?|csv|txt|pptx?))['"]?/i);
+    if (filenameMatch?.[1]) {
+      const referenced = filenameMatch[1];
+      refs.push(
+        path.isAbsolute(referenced) ? referenced : path.resolve(cwd || process.cwd(), referenced)
+      );
+
+      const filePath = this.findFileOnDisk(referenced);
+      if (filePath) refs.push(filePath);
+    }
+
+    return Array.from(new Set(refs));
   }
 
   /** Search Desktop / Downloads / Documents / home for a given filename */
@@ -663,27 +697,52 @@ export class CoworkAgentRunner {
     return null;
   }
 
+  private isExplicitBrowserIntent(prompt: string): boolean {
+    const lower = prompt.toLowerCase();
+    return /\b(open|use|browse|navigate|visit|go to|search|google|web|website|url|http|https|browser|chrome|amazon|nasdaq|flight|stock price|current price|latest news)\b/.test(
+      lower
+    );
+  }
+
+  private isLocalArtifactIntent(prompt: string): boolean {
+    const lower = prompt.toLowerCase();
+    const hasLocalFileSignal =
+      /\b(pfa|attached|attachment|based on the attached|source file|local file|\.xlsx?|\.docx?|\.csv|\.txt)\b/.test(
+        lower
+      );
+    const hasArtifactSignal =
+      /\b(create|make|generate|build|produce|write|prepare|draft|wbs|work breakdown|project plan|tasks?|subtasks?|pptx?|presentation|slides|document|docx?|excel|spreadsheet|workbook)\b/.test(
+        lower
+      );
+    return hasLocalFileSignal && hasArtifactSignal;
+  }
+
   /**
    * Pre-interceptor: if the user's prompt is clearly an office document creation request,
    * call the MCP tool directly — bypassing the LLM which tends to describe rather than act.
    * Returns true if the request was handled (caller should skip piSession.prompt).
    */
   private async tryDirectOfficeToolCall(
-    sessionId: string,
+    session: Session,
     prompt: string,
-    thinkingStepId: string
+    thinkingStepId: string,
+    existingMessages: Message[]
   ): Promise<boolean> {
     if (!this.mcpManager) return false;
     const toolName = this.detectOfficeDocIntent(prompt);
     if (!toolName) return false;
 
-    // Only intercept when the prompt is primarily a creation request (not research/analysis)
+    // Only intercept when the prompt is primarily a creation request (not research/analysis).
+    // The confirmation-phrase branch (give me/go ahead/yes/...) is safe to include unconditionally
+    // here because it's already gated behind detectOfficeDocIntent finding an explicit doc-type
+    // keyword in THIS prompt — a bare "please explain X" never reaches this point.
     const lower = prompt.toLowerCase();
     const isCreation =
       /\b(create|make|generate|build|produce|write|prepare|draft)\b/.test(lower) ||
-      /\b(sample|template|format|invoice|report|spreadsheet|tracker|budget|proposal|agenda|deck)\b/.test(
+      /\b(sample|template|format|invoice|report|spreadsheet|tracker|budget|proposal|agenda|deck|wbs|work breakdown|project plan|tasks?|subtasks?)\b/.test(
         lower
-      );
+      ) ||
+      /\b(give me|send me|go ahead|do it|proceed|yes please|sure)\b/.test(lower);
     if (!isCreation) return false;
 
     log(
@@ -691,10 +750,32 @@ export class CoworkAgentRunner {
     );
 
     try {
-      this.sendTraceUpdate(sessionId, thinkingStepId, { title: 'Creating document…' });
+      this.sendTraceUpdate(session.id, thinkingStepId, { title: 'Creating document…' });
+      this.sendTraceStep(session.id, {
+        id: uuidv4(),
+        type: 'tool_call',
+        status: 'completed',
+        title: 'Detected Office artifact request',
+        toolName,
+        toolInput: { request: prompt.slice(0, 300) },
+        timestamp: Date.now(),
+      });
 
-      // Auto-derive a filename from the prompt
-      const slug = prompt
+      // If this turn is just a bare confirmation ("give me excel sheet", "yes go ahead"),
+      // it carries no content of its own — pull the real request from the most recent
+      // substantive USER turn instead. This is what keeps the filename/content grounded in
+      // "school fees collection" rather than accidentally picking up the assistant's own
+      // prior reply (assistant turns are never eligible here, see findRecentSubstantiveUserPrompt).
+      let effectivePrompt = prompt;
+      if (isLikelyConfirmationFollowUp(prompt)) {
+        const priorPrompt = findRecentSubstantiveUserPrompt(existingMessages, prompt);
+        if (priorPrompt) {
+          effectivePrompt = priorPrompt;
+        }
+      }
+
+      // Auto-derive a filename from the effective (content-bearing) prompt
+      const slug = effectivePrompt
         .toLowerCase()
         .replace(/[^a-z0-9\s]/g, '')
         .trim()
@@ -703,39 +784,88 @@ export class CoworkAgentRunner {
         .join('_');
 
       // If the prompt references a local file, read it and inject its content
-      let description = prompt;
-      const referencedFilename = this.extractReferencedFilename(prompt);
-      if (referencedFilename) {
-        const filePath = this.findFileOnDisk(referencedFilename);
-        if (filePath) {
-          const fileContent = this.readAttachedFileContent(filePath);
-          if (fileContent) {
-            description =
-              `User request: ${prompt}\n\n` +
-              `=== CONTENT FROM ATTACHED FILE: ${referencedFilename} ===\n${fileContent}`;
-          }
+      let description = effectivePrompt;
+      let sourceFile: string | undefined;
+      const referencedFilePaths = this.extractReferencedFilePaths(prompt, session.cwd);
+      if (referencedFilePaths.length > 0) {
+        this.sendTraceStep(session.id, {
+          id: uuidv4(),
+          type: 'tool_call',
+          status: 'running',
+          title: 'Resolving attached source file',
+          toolName: 'source_file',
+          toolInput: { candidates: referencedFilePaths },
+          timestamp: Date.now(),
+        });
+      }
+      for (const filePath of referencedFilePaths) {
+        if (!fs.existsSync(filePath)) continue;
+        sourceFile = filePath;
+        this.sendTraceStep(session.id, {
+          id: uuidv4(),
+          type: 'tool_result',
+          status: 'completed',
+          title: 'Source file resolved',
+          toolName: 'source_file',
+          toolOutput: path.basename(filePath),
+          timestamp: Date.now(),
+        });
+        const fileContent = this.readAttachedFileContent(filePath);
+        if (fileContent) {
+          this.sendTraceStep(session.id, {
+            id: uuidv4(),
+            type: 'tool_result',
+            status: 'completed',
+            title: 'Source workbook/text extracted',
+            toolName: 'source_file',
+            toolOutput: `${path.basename(filePath)} (${fileContent.length.toLocaleString()} chars sampled)`,
+            timestamp: Date.now(),
+          });
+          description =
+            `User request: ${effectivePrompt}\n\n` +
+            `=== CONTENT FROM ATTACHED FILE: ${path.basename(filePath)} ===\n${fileContent}`;
+          break;
         }
       }
 
+      const officeStepId = uuidv4();
+      this.sendTraceStep(session.id, {
+        id: officeStepId,
+        type: 'tool_call',
+        status: 'running',
+        title: sourceFile ? 'Generating artifact from source file' : 'Generating Office artifact',
+        toolName,
+        toolInput: {
+          filename: slug || 'document',
+          ...(sourceFile ? { source_file: sourceFile } : {}),
+        },
+        timestamp: Date.now(),
+      });
       const result = await this.mcpManager.callTool(toolName, {
         description,
         filename: slug || 'document',
+        ...(sourceFile ? { source_file: sourceFile } : {}),
       });
 
       const text = Array.isArray((result as { content?: { text?: string }[] }).content)
         ? ((result as { content: { text?: string }[] }).content[0]?.text ?? String(result))
         : String(result);
 
-      this.sendTraceUpdate(sessionId, thinkingStepId, {
+      this.sendTraceUpdate(session.id, officeStepId, {
+        status: 'completed',
+        title: 'Office artifact generated',
+        toolOutput: text.slice(0, 400),
+      });
+      this.sendTraceUpdate(session.id, thinkingStepId, {
         status: 'completed',
         title: 'Document created',
         toolName,
         toolOutput: text.slice(0, 400),
       });
 
-      this.sendMessage(sessionId, {
+      this.sendMessage(session.id, {
         id: uuidv4(),
-        sessionId,
+        sessionId: session.id,
         role: 'assistant',
         content: [{ type: 'text', text }],
         timestamp: Date.now(),
@@ -761,6 +891,7 @@ export class CoworkAgentRunner {
         logWarn('[CoworkAgentRunner] dispose error:', e);
       }
       this.piSessions.delete(sessionId);
+      this.loopGuards.delete(sessionId);
       log('[CoworkAgentRunner] Disposed pi session for:', sessionId);
     }
   }
@@ -1090,6 +1221,18 @@ ${hints.join('\n')}
    * the backend, but the renderer's loading spinner may not clear. This is
    * a renderer-side issue tracked as a follow-up.
    */
+  /** Get-or-create the session-scoped LoopGuard. Session-scoped (not per-turn) —
+   * see the `loopGuards` field doc for why. Shared between the permission hook
+   * (installed once at session creation) and the per-turn prompt() loop. */
+  private getOrCreateLoopGuard(sessionId: string): LoopGuard {
+    let loopGuard = this.loopGuards.get(sessionId);
+    if (!loopGuard) {
+      loopGuard = new LoopGuard();
+      this.loopGuards.set(sessionId, loopGuard);
+    }
+    return loopGuard;
+  }
+
   private installPermissionHook(piSession: PiAgentSession, sessionId: string): void {
     if (!this.requestPermission) {
       log('[CoworkAgentRunner] No requestPermission callback — skipping permission hook');
@@ -1141,6 +1284,18 @@ ${hints.join('\n')}
           };
         }
 
+        // Autonomous Mode: skip the requestPermission round-trip (and its
+        // wait for a click that may never come, e.g. scheduled/unattended
+        // runs) for tools that would otherwise land on 'ask'. Explicit
+        // 'deny' rules above are never affected, and this does not touch
+        // tool-level safety checks that are independent of the permission
+        // system (e.g. GUI_Operate's irreversible-click confirmation).
+        if (decision === 'ask' && configStore.get('autoApproveTools')) {
+          log(`[CoworkAgentRunner] Tool '${toolName}' auto-approved (Autonomous Mode)`);
+          this.getOrCreateLoopGuard(sessionId).recordPermissionAllow();
+          return sdkBeforeToolCall ? sdkBeforeToolCall(ctx, signal) : undefined;
+        }
+
         if (decision === 'ask') {
           const toolUseId = `${ctx.toolCall?.id ?? 'unknown'}-perm-${uuidv4().slice(0, 8)}`;
           let result: 'allow' | 'deny' | 'allow_always';
@@ -1162,6 +1317,44 @@ ${hints.join('\n')}
 
           if (result === 'deny') {
             log(`[CoworkAgentRunner] Tool '${toolName}' denied by user`);
+
+            // Repeated denials are an explicit, unambiguous "stop" signal —
+            // track them the same way as tool-call loops so the agent halts
+            // instead of silently moving on to try something else.
+            const loopGuard = this.getOrCreateLoopGuard(sessionId);
+            const denialDecision = loopGuard.recordPermissionDenial();
+            if (denialDecision.action === 'permission_denial_warn') {
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const sessionAny = piSession as any;
+                if (typeof sessionAny.sendUserMessage === 'function') {
+                  Promise.resolve(
+                    sessionAny.sendUserMessage(buildWarnSteerMessage(denialDecision), {
+                      deliverAs: 'steer',
+                    })
+                  ).catch((err: unknown) => {
+                    logWarn('[LoopGuard] sendUserMessage(permission steer) failed:', err);
+                  });
+                }
+              } catch (steerErr) {
+                logWarn('[LoopGuard] permission steer setup failed:', steerErr);
+              }
+            } else if (denialDecision.action === 'permission_denial_abort') {
+              logWarn(`[LoopGuard] ${denialDecision.reason} — aborting turn`);
+              this.sendMessage(sessionId, {
+                id: uuidv4(),
+                sessionId,
+                role: 'assistant',
+                content: [{ type: 'text', text: buildAbortUserMessage(denialDecision) }],
+                timestamp: Date.now(),
+              });
+              try {
+                agent.abort();
+              } catch (abortErr) {
+                logWarn('[LoopGuard] abort error after repeated permission denials:', abortErr);
+              }
+            }
+
             return { block: true, reason: `User denied permission for '${displayName}'.` };
           }
 
@@ -1170,7 +1363,9 @@ ${hints.join('\n')}
           }
         }
 
-        // Allowed — delegate to SDK's original hook for event pipeline
+        // Allowed — reset the denial streak (the interaction is back on track)
+        // and delegate to the SDK's original hook for the event pipeline.
+        this.getOrCreateLoopGuard(sessionId).recordPermissionAllow();
         return sdkBeforeToolCall ? sdkBeforeToolCall(ctx, signal) : undefined;
       }
     );
@@ -1754,6 +1949,17 @@ ${hints.join('\n')}
         log('[CoworkAgentRunner] User message contains images');
       }
 
+      // Enterprise guardrail: local attachment artifact requests must be handled
+      // deterministically by Office/File tools before model routing, memory expansion,
+      // or browser tools can influence the run.
+      const earlyOfficeHandled = await this.tryDirectOfficeToolCall(
+        session,
+        prompt,
+        thinkingStepId,
+        existingMessages
+      );
+      if (earlyOfficeHandled) return;
+
       logTiming('before pi-ai model resolution', runStartTime);
 
       // Resolve model via pi-ai
@@ -2182,7 +2388,8 @@ ${hints.join('\n')}
                 const hasPlaceholders = resolvedArgs.some(
                   (arg) =>
                     arg.includes('{SOFTWARE_DEV_SERVER_PATH}') ||
-                    arg.includes('{GUI_OPERATE_SERVER_PATH}')
+                    arg.includes('{GUI_OPERATE_SERVER_PATH}') ||
+                    arg.includes('{OFFICE_TOOLS_SERVER_PATH}')
                 );
 
                 if (hasPlaceholders) {
@@ -2195,6 +2402,8 @@ ${hints.join('\n')}
                     presetKey = 'software-development';
                   } else if (config.name === 'GUI_Operate' || config.name === 'GUI Operate') {
                     presetKey = 'gui-operate';
+                  } else if (config.name === 'Office_Tools' || config.name === 'Office Tools') {
+                    presetKey = 'office-tools';
                   }
 
                   if (presetKey) {
@@ -2280,10 +2489,10 @@ This is an isolated sandbox environment. Use ${VIRTUAL_WORKSPACE_PATH} as the ro
 </your_configuration>`;
 
       const coworkAppendPrompt = [
-        'You are dsr-CoworkAI, an AI assistant by DSR AI Lab. Be concise, accurate, and tool-capable. Always deliver direct output — never suggest scripts or workarounds when a tool can produce the result immediately.',
+        'You are V-Coworker, an AI assistant by DSR AI Lab. Be concise, accurate, and tool-capable. Always deliver direct output — never suggest scripts or workarounds when a tool can produce the result immediately.',
         `CRITICAL BEHAVIORAL RULES:
 1. DIRECT OUTPUT ALWAYS: When the user asks you to create a file, document, spreadsheet, presentation, image, or any artifact — produce it immediately using the appropriate MCP tool. Do NOT suggest Python scripts, shell commands, or workarounds. Do NOT ask "Would you like me to...". Just call the tool and deliver the file.
-2. CHAT FIRST for non-actionable requests: For questions, summaries, explanations, and general conversation — reply directly in chat text.
+2. CHAT FIRST for non-actionable requests: Do NOT create, write, or edit files unless the user explicitly asks. For questions, summaries, explanations, and general conversation — reply directly in chat text.
 3. When a request is actionable, proceed immediately with reasonable assumptions. If you need clarification, ask briefly in plain text.
 4. For relative time windows like "within two days" in browsing or research tasks, assume the most recent two relevant publication days unless the user explicitly defines another date range.
 5. For bracketed placeholders like [Agent], [Topic], etc., treat the word inside brackets as the literal search keyword unless the user says otherwise.
@@ -2291,7 +2500,7 @@ This is an isolated sandbox environment. Use ${VIRTUAL_WORKSPACE_PATH} as the ro
         configSummaryPrompt,
         workspaceInfoPrompt,
         `<citation_requirements>
-If your answer uses linkable content from MCP tools, include a "Sources:" section and otherwise use standard Markdown links.
+If your answer uses linkable content from MCP tools, include a "Sources:" section and otherwise use standard Markdown links: [Title](https://example.com)
 </citation_requirements>`,
         `<tool_behavior>
 OFFICE DOCUMENT CREATION — HIGHEST PRIORITY RULE:
@@ -2310,6 +2519,21 @@ When the user attaches or references a local file (e.g. "PFA", "based on the att
   4. Create the output document immediately.
 
 CHROME/BROWSER: Only use Chrome MCP tools (mcp__Chrome__*) when user explicitly asks to browse a URL or use the browser.
+  Sequencing rules (follow strictly to avoid loops):
+  1. Call list_pages FIRST, before new_page or navigate_page. The browser is a long-lived
+     process shared across sessions — it may already have open tabs, including tabs from
+     unrelated earlier tasks. Do not assume no pages exist.
+  2. If list_pages shows a page already relevant to the CURRENT task (e.g. same site, same
+     purpose), reuse it via select_page/navigate_page. Do NOT open a new tab for a task that
+     can continue in an existing one.
+  3. Ignore tabs unrelated to the current task even if list_pages returns them — never switch
+     topics (e.g. price lookups, unrelated news) because an unrelated tab happens to be open.
+  4. Call new_page AT MOST ONCE per task, unless the user explicitly asks for another tab.
+  5. If navigate_page fails with "No page selected," do NOT call new_page again. Call
+     list_pages, then select_page on an existing page, or create exactly one new page if none
+     exist — never retry new_page speculatively.
+  6. If the same action fails twice in a row, stop and explain the blocker to the user in text
+     instead of retrying with slightly different arguments.
 WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the web. File tasks and document creation tasks are LOCAL — never web-triggered.
 </tool_behavior>`,
         this.getBundledPathHints(),
@@ -2322,7 +2546,17 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
       // Create or reuse agent session
       // Bridge MCP tools as customTools for the agent SDK.
       // Re-read every query so newly added/removed MCP servers take effect immediately.
-      const mcpCustomTools = this.mcpManager ? buildMcpCustomTools(this.mcpManager) : [];
+      const shouldExposeBrowserTools =
+        this.isExplicitBrowserIntent(prompt) && !this.isLocalArtifactIntent(prompt);
+      const mcpCustomTools = this.mcpManager
+        ? buildMcpCustomTools(this.mcpManager).filter((tool) => {
+            if (shouldExposeBrowserTools) return true;
+            return !tool.name.toLowerCase().startsWith('mcp__chrome__');
+          })
+        : [];
+      if (!shouldExposeBrowserTools) {
+        log('[CoworkAgentRunner] Browser tools withheld for non-browser/local-artifact request');
+      }
       const extensionCustomTools = extensionResult.customTools || [];
       const customTools = [...mcpCustomTools, ...extensionCustomTools];
       if (mcpCustomTools.length > 0) {
@@ -2385,14 +2619,6 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
           );
           await piSession.setModel(piModel);
           cachedSession.modelId = piModel.id;
-          // Update Ollama num_ctx ref if present
-          if (cachedSession.ollamaNumCtx) {
-            cachedSession.ollamaNumCtx.value = piModel.contextWindow || 128000;
-            log(
-              '[CoworkAgentRunner] Updated Ollama num_ctx on hot-swap:',
-              cachedSession.ollamaNumCtx.value
-            );
-          }
         }
         if (cachedSession.thinkingLevel !== thinkingLevel) {
           logCtx(
@@ -2504,6 +2730,7 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
               }
             }
             this.piSessions.delete(oldestKey);
+            this.loopGuards.delete(oldestKey);
             log('[CoworkAgentRunner] Evicted oldest cached session:', oldestKey);
           }
         }
@@ -2515,38 +2742,25 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
           skillsSignature,
         });
 
-        // Ollama: wrap _onPayload to inject num_ctx into every request
-        if (provider === 'ollama') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const agent = piSession.agent as any;
-          // Guard: only patch if the SDK exposes _onPayload (private API)
-          if (!('_onPayload' in agent)) {
-            logWarn(
-              '[CoworkAgentRunner] SDK agent does not expose _onPayload — skipping Ollama num_ctx patch'
-            );
-          } else {
-            const originalOnPayload = agent._onPayload as
-              | ((
-                  payload: Record<string, unknown>,
-                  modelArg: unknown
-                ) => Promise<Record<string, unknown>>)
-              | undefined;
-            const ollamaNumCtx = {
-              value: piModel.contextWindow || 128000,
-            };
-            agent._onPayload = async (payload: Record<string, unknown>, modelArg: unknown) => {
-              let result = originalOnPayload
-                ? await originalOnPayload.call(agent, payload, modelArg)
-                : payload;
-              if (result === undefined) result = payload;
-              return { ...result, num_ctx: ollamaNumCtx.value };
-            };
-            this.piSessions.get(session.id)!.ollamaNumCtx = ollamaNumCtx;
-            log(
-              '[CoworkAgentRunner] Ollama _onPayload wrapper installed, num_ctx:',
-              ollamaNumCtx.value
-            );
-          } // end else (_onPayload exists)
+        // NOTE: We previously tried to force num_ctx per-request here via a patched
+        // _onPayload hook. That doesn't work: this app talks to Ollama over its
+        // OpenAI-compatible /v1/chat/completions transport, which silently ignores
+        // num_ctx (top-level or nested under "options") — confirmed by direct testing.
+        // Ollama only honors num_ctx as a Modelfile-baked PARAMETER at model-load time.
+        // The real fix is ensuring the model itself is configured with an adequate
+        // context window (see ollama-api.ts's fetchOllamaModelInfo, which now reads
+        // that baked-in value instead of trusting the architecture's max supported
+        // context_length, which is frequently far larger than what actually gets loaded).
+        if (
+          provider === 'ollama' &&
+          typeof piModel.contextWindow === 'number' &&
+          piModel.contextWindow < 16384
+        ) {
+          logWarn(
+            '[CoworkAgentRunner] Ollama model context window is small:',
+            piModel.contextWindow,
+            '— long tool-heavy sessions may silently lose earlier context. Consider baking a larger `PARAMETER num_ctx` into the model via `ollama create`.'
+          );
         }
 
         logTiming('agent session created', runStartTime);
@@ -2565,14 +2779,25 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
       // ── Loop guard: protect against runaway tool-call loops ──
       // (e.g. gemini-3.1-pro with thinking=off has been observed producing hundreds
       //  of empty-text + single-tool-call responses in a single turn)
-      // Two layers: hash of whole tool-call group (window=20, warn=3/halt=5/abort=8)
-      //             + per-tool frequency (warn=30/halt=50/abort=80).
-      const loopGuard = new LoopGuard();
+      // Three layers: hash of whole tool-call group (window=20, warn=3/halt=5/abort=8)
+      //             + tool-name-only consecutive streak, ignoring args (warn=4/halt=7/abort=12)
+      //             + per-tool cumulative frequency (warn=30/halt=50/abort=80).
+      // Session-scoped (not per-turn): reused across every prompt() call for this session so
+      // a user manually retrying after a loop doesn't hand the model a fresh set of counters.
+      let loopGuard = this.loopGuards.get(session.id);
+      if (!loopGuard) {
+        loopGuard = new LoopGuard();
+        this.loopGuards.set(session.id, loopGuard);
+      }
       const handleLoopGuardDecision = (decision: LoopGuardDecision, context: string): void => {
         if (decision.action === 'none' || controller.signal.aborted) return;
         logWarn(`[LoopGuard] ${context}: action=${decision.action} reason=${decision.reason}`);
 
-        if (decision.action === 'hash_abort' || decision.action === 'freq_abort') {
+        if (
+          decision.action === 'hash_abort' ||
+          decision.action === 'freq_abort' ||
+          decision.action === 'name_abort'
+        ) {
           // Always surface the loop-guard explanation, even if an earlier
           // error already set hasEmittedError — the user must see why the
           // session stopped. Mark the flag afterward to suppress duplicate
@@ -2602,7 +2827,9 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
         }
 
         const steerText =
-          decision.action === 'hash_halt' || decision.action === 'freq_halt'
+          decision.action === 'hash_halt' ||
+          decision.action === 'freq_halt' ||
+          decision.action === 'name_halt'
             ? buildHaltSteerMessage(decision)
             : buildWarnSteerMessage(decision);
         // fire-and-forget: SDK queues the steering message for the next turn
@@ -2987,6 +3214,46 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
                 timestamp: Date.now(),
               };
               this.sendMessage(session.id, toolResultMsg);
+
+              // Google Workspace connection expired/not connected is an
+              // unambiguous, unrecoverable-for-this-turn state — only the
+              // user re-authorizing in Settings can fix it. Stop immediately
+              // rather than let the model "creatively" work around it (e.g.
+              // writing scripts that fabricate/simulate the missing data,
+              // observed in production on a scheduled morning-brief task).
+              if (
+                isError &&
+                !controller.signal.aborted &&
+                /Google_Workspace/i.test(event.toolName) &&
+                /(needs to be re-authorized|is not connected)/i.test(outputText)
+              ) {
+                this.sendMessage(session.id, {
+                  id: uuidv4(),
+                  sessionId: session.id,
+                  role: 'assistant',
+                  content: [
+                    {
+                      type: 'text',
+                      text: 'Stopped: your Google Workspace connection needs to be re-authorized. Open Settings → Connectors → Google Workspace and click "Reconnect" — I cannot fetch real Gmail/Drive/Calendar data until then, and won\'t fabricate substitute data or scripts instead.',
+                    },
+                  ],
+                  timestamp: Date.now(),
+                });
+                hasEmittedError = true;
+                this.sendTraceUpdate(session.id, thinkingStepId, {
+                  status: 'error',
+                  title: 'Stopped: Google Workspace needs reconnect',
+                });
+                try {
+                  abortedByLoopGuard = true;
+                  controller.abort();
+                } catch (abortErr) {
+                  logWarn(
+                    '[CoworkAgentRunner] abort error after Google Workspace reconnect failure:',
+                    abortErr
+                  );
+                }
+              }
               break;
             }
 
@@ -3104,15 +3371,6 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
             })
           );
         }
-        // Office document pre-interceptor: call tool directly when intent is clear,
-        // bypassing the LLM which tends to describe the document instead of creating it.
-        const officeHandled = await this.tryDirectOfficeToolCall(
-          session.id,
-          prompt,
-          thinkingStepId
-        );
-        if (officeHandled) return;
-
         const promptResult = await piSession.prompt(contextualPrompt);
         log(
           '[CoworkAgentRunner] prompt() returned:',
@@ -3158,7 +3416,9 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
       // them with the default "Task completed" below.
       const abortDisposition = resolveAbortDisposition({
         abortedByTimeout,
-        abortedByLoopGuard,
+        abortedByLoopGuard:
+          abortedByLoopGuard ||
+          (this.loopGuards.get(session.id)?.wasAbortedByPermissionDenial() ?? false),
         abortedByStreamError,
       });
       if (controller.signal.aborted && shouldPreserveExistingTrace(abortDisposition)) {
@@ -3176,7 +3436,9 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
       if (error instanceof Error && error.name === 'AbortError') {
         const abortDisposition = resolveAbortDisposition({
           abortedByTimeout,
-          abortedByLoopGuard,
+          abortedByLoopGuard:
+            abortedByLoopGuard ||
+            (this.loopGuards.get(session.id)?.wasAbortedByPermissionDenial() ?? false),
           abortedByStreamError,
         });
         if (abortDisposition === 'timeout') {

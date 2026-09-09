@@ -605,7 +605,7 @@ export class RemoteGateway extends EventEmitter {
   }
 
   private handleWebhook(req: IncomingMessage, res: ServerResponse, url: string): void {
-    // Extract channel type from URL: /webhook/feishu, /webhook/telegram, etc.
+    // Extract channel type from URL: /webhook/websocket, /webhook/telegram, etc.
     const channelType = url.split('/')[2] as ChannelType;
 
     log(`[Gateway] Received webhook for channel: ${channelType}, URL: ${url}`);

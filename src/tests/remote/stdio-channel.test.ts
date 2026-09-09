@@ -399,7 +399,7 @@ describe('StdioChannel', () => {
       writeSpy.mockClear();
 
       await channel.send({
-        channelType: 'stdio' as 'feishu',
+        channelType: 'stdio',
         channelId: 'sid-1',
         replyTo: 'msg-123',
         content: { type: 'text', text: 'An internal error occurred.' },
@@ -422,7 +422,7 @@ describe('StdioChannel', () => {
       writeSpy.mockClear();
 
       await channel.send({
-        channelType: 'stdio' as 'feishu',
+        channelType: 'stdio',
         channelId: 'sid-1',
         content: { type: 'text', text: 'Hello world' },
       });
@@ -442,7 +442,7 @@ describe('StdioChannel', () => {
       writeSpy.mockClear();
 
       await channel.send({
-        channelType: 'stdio' as 'feishu',
+        channelType: 'stdio',
         channelId: 'sid-1',
         replyTo: 'msg-123',
         content: { type: 'text', text: 'Hello' },

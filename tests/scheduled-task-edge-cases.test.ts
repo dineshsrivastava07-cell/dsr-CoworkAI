@@ -18,6 +18,9 @@ function createTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     scheduleConfig: null,
     repeatEvery: null,
     repeatUnit: null,
+    watchConfig: null,
+    lastCheckedState: null,
+    lastCheckedAt: null,
     lastRunAt: null,
     lastRunSessionId: null,
     lastError: null,
@@ -131,7 +134,11 @@ describe('ScheduledTaskManager – edge cases', () => {
     };
 
     const executeTask = vi.fn().mockResolvedValue({ sessionId: 'session-null' });
-    const manager = new ScheduledTaskManager({ store: innerStore, executeTask, now: () => Date.now() });
+    const manager = new ScheduledTaskManager({
+      store: innerStore,
+      executeTask,
+      now: () => Date.now(),
+    });
     manager.start();
 
     // Should not throw even though store.update returns null
@@ -173,7 +180,7 @@ describe('ScheduledTaskManager – edge cases', () => {
     expect(final?.nextRunAt).toBeGreaterThan(now);
 
     // Access internal timers map to verify exactly one timer exists
-    const timers = (manager as any).timers as Map<string, NodeJS.Timeout>;
+    const timers = (manager as unknown as { timers: Map<string, NodeJS.Timeout> }).timers;
     expect(timers.size).toBe(1);
     expect(timers.has('rapid-toggle')).toBe(true);
   });

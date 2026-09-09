@@ -60,8 +60,17 @@ import type {
 } from '../renderer/types';
 import { remoteManager, type AgentExecutor } from './remote/remote-manager';
 import { remoteConfigStore } from './remote/remote-config-store';
-import type { GatewayConfig, FeishuChannelConfig, ChannelType } from './remote/types';
+import type { GatewayConfig, ChannelType } from './remote/types';
 import { startNavServer, stopNavServer } from './nav-server';
+import {
+  connectGoogleAccount,
+  disconnectGoogleAccount,
+  getGoogleConnectionStatus,
+  initializeBundledCredentials,
+  saveGoogleClientCredentials,
+  startGoogleTokenBroker,
+  stopGoogleTokenBroker,
+} from './google';
 import {
   ScheduledTaskManager,
   type ScheduledTaskCreateInput,
@@ -382,7 +391,7 @@ function setupTray() {
   }
 
   tray = new Tray(resolvedIconPath);
-  tray.setToolTip('dsr-CoworkAI');
+  tray.setToolTip('V-Coworker');
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -888,6 +897,21 @@ app
       process.exit(0);
     }
 
+    // Auto-save bundled OAuth credentials (from env vars) before the broker
+    // starts — ensures hasClientCredentials() returns true on first launch
+    // so users see "Sign in with Google" directly.
+    initializeBundledCredentials();
+
+    // Must start before either SessionManager construction path below —
+    // SessionManager's constructor kicks off MCP server connection without
+    // awaiting it, so the Google_Workspace server (if enabled) would spawn
+    // with no GOOGLE_TOKEN_BROKER_PORT/SECRET env vars if this ran later.
+    try {
+      await startGoogleTokenBroker();
+    } catch (error) {
+      logError('[Google] Failed to start token broker:', error);
+    }
+
     // ── Headless mode ──────────────────────────────────────────────────
     const headlessArgs = parseHeadlessArgs();
 
@@ -1012,8 +1036,9 @@ app
           if (title !== task.title) {
             headlessScheduledTaskStore.update(task.id, { title });
           }
-          await sessionManager.startSession(title, task.prompt, task.cwd);
-          return { sessionId: '' };
+          const started = await sessionManager.startSession(title, task.prompt, task.cwd);
+          sessionManager.markSessionScheduled(started.id);
+          return { sessionId: started.id };
         },
         onTaskError: (taskId, error) => {
           headlessSendWithPermission({
@@ -1291,10 +1316,10 @@ app
     startConfigFileWatcher();
 
     // Log environment variables for debugging
-    log('=== dsr-CoworkAI Starting ===');
+    log('=== V-Coworker Starting ===');
     log('Config file:', configStore.getPath());
     log('Is configured:', configStore.isConfigured());
-    log('[Runtime] Using dsr-CoworkAI agent SDK — Ollama/Gemma local executor');
+    log('[Runtime] Using V-Coworker agent SDK — Ollama/Gemma local executor');
     log('Developer logs:', enableDevLogs ? 'Enabled' : 'Disabled');
     log('Environment Variables:');
     log('  ANTHROPIC_AUTH_TOKEN:', process.env.ANTHROPIC_AUTH_TOKEN ? '✓ Set' : '✗ Not set');
@@ -1426,6 +1451,7 @@ app
           scheduledTaskStore.update(task.id, { title });
         }
         const started = await sessionManager.startSession(title, task.prompt, task.cwd);
+        sessionManager.markSessionScheduled(started.id);
         // 定时任务创建的新会话需要主动同步到前端会话列表
         sendToRenderer({
           type: 'session.update',
@@ -1498,7 +1524,10 @@ app
   .catch((error) => {
     logError('[App] Startup failed:', error);
     const message = error instanceof Error ? error.message : 'Unknown startup error';
-    dialog.showErrorBox('dsr-CoworkAI Startup Failed', `${message}\n\nPlease check the logs for more information.`);
+    dialog.showErrorBox(
+      'V-Coworker Startup Failed',
+      `${message}\n\nPlease check the logs for more information.`
+    );
     app.quit();
   });
 
@@ -1533,6 +1562,7 @@ async function cleanupSandboxResources(): Promise<void> {
   isCleaningUp = true;
 
   stopNavServer();
+  await stopGoogleTokenBroker();
   stopConfigFileWatcher();
   skillsManager?.stopStorageMonitoring();
   scheduledTaskManager?.stop();
@@ -1622,6 +1652,7 @@ app.on('before-quit', async (event) => {
     // In dev mode, exit quickly — no need for async sandbox cleanup
     if (process.env.VITE_DEV_SERVER_URL) {
       stopNavServer();
+      await stopGoogleTokenBroker();
       try {
         closeDatabase();
       } catch {
@@ -2207,6 +2238,87 @@ ipcMain.handle('mcp.getPresets', () => {
   }
 });
 
+// Google Workspace connector API handlers
+ipcMain.handle('google.getStatus', () => {
+  try {
+    return getGoogleConnectionStatus();
+  } catch (error) {
+    logError('[Google] Error getting status:', error);
+    return {
+      connected: false,
+      accountEmail: null,
+      needsReconnect: false,
+      lastErrorMessage: 'Failed to read connection status.',
+      hasClientCredentials: false,
+    };
+  }
+});
+
+ipcMain.handle(
+  'google.saveClientCredentials',
+  (_event, payload: { clientId: string; clientSecret: string }) => {
+    try {
+      return saveGoogleClientCredentials(payload);
+    } catch (error) {
+      logError('[Google] Error saving client credentials:', error);
+      return { success: false, error: 'Failed to save credentials.' };
+    }
+  }
+);
+
+// Enables (creating the config from the preset if needed) the Google_Workspace
+// MCP server, mirroring the mcp.saveServer handler's own update/rollback
+// pattern above — the server is only added to mcp-config.json once there's
+// actually a connected account to serve.
+async function setGoogleWorkspaceServerEnabled(enabled: boolean): Promise<void> {
+  if (!sessionManager) return;
+
+  const servers = mcpConfigStore.getServers();
+  let config = servers.find((s) => s.name === 'Google_Workspace' || s.name === 'Google Workspace');
+
+  if (!config) {
+    if (!enabled) return;
+    const created = mcpConfigStore.createFromPreset('google-workspace', true);
+    if (!created) {
+      logWarn('[Google] No google-workspace preset found — cannot enable MCP server');
+      return;
+    }
+    config = created;
+  } else if (config.enabled === enabled) {
+    return;
+  } else {
+    config = { ...config, enabled };
+  }
+
+  mcpConfigStore.saveServer(config);
+  const mcpManager = sessionManager.getMCPManager();
+  try {
+    await mcpManager.updateServer(config);
+    sessionManager.invalidateMcpServersCache();
+    log(`[Google] Google_Workspace server ${enabled ? 'enabled' : 'disabled'} successfully`);
+  } catch (err) {
+    logError('[Google] Failed to update Google_Workspace server:', err);
+    if (enabled) {
+      // Roll back to disabled rather than leaving a dead-but-enabled entry.
+      mcpConfigStore.saveServer({ ...config, enabled: false });
+    }
+  }
+}
+
+ipcMain.handle('google.connectAccount', async () => {
+  const result = await connectGoogleAccount();
+  if (result.success) {
+    await setGoogleWorkspaceServerEnabled(true);
+  }
+  return result;
+});
+
+ipcMain.handle('google.disconnectAccount', async () => {
+  const result = await disconnectGoogleAccount();
+  await setGoogleWorkspaceServerEnabled(false);
+  return result;
+});
+
 // Skills API handlers
 ipcMain.handle('skills.getAll', async () => {
   try {
@@ -2714,7 +2826,7 @@ ipcMain.handle('logs.export', async () => {
       });
       archive.append(
         [
-          'dsr-CoworkAI diagnostic bundle',
+          'V-Coworker diagnostic bundle',
           `Exported at: ${diagnosticsSummary.exportedAt}`,
           '',
           'Included files:',
@@ -2844,16 +2956,6 @@ ipcMain.handle('remote.updateGatewayConfig', async (_event, config: Partial<Gate
   }
 });
 
-ipcMain.handle('remote.updateFeishuConfig', async (_event, config: FeishuChannelConfig) => {
-  try {
-    await remoteManager.updateFeishuConfig(config);
-    return { success: true };
-  } catch (error) {
-    logError('[Remote] Error updating Feishu config:', error);
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
-  }
-});
-
 ipcMain.handle('remote.getPairedUsers', () => {
   try {
     return remoteManager.getPairedUsers();
@@ -2932,7 +3034,7 @@ ipcMain.handle('remote.getTunnelStatus', () => {
 
 ipcMain.handle('remote.getWebhookUrl', () => {
   try {
-    return remoteManager.getFeishuWebhookUrl();
+    return remoteManager.getWebhookUrl();
   } catch (error) {
     logError('[Remote] Error getting webhook URL:', error);
     return null;
@@ -3199,7 +3301,8 @@ async function handleClientEvent(event: ClientEvent): Promise<unknown> {
     sendToRenderer({
       type: 'error',
       payload: {
-        message: '当前方案未配置可用凭证，请先在 API 设置中完成配置',
+        message:
+          'The current config set has no usable credentials. Please finish setup in API Settings first.',
         code: 'CONFIG_REQUIRED_ACTIVE_SET',
         action: 'open_api_settings',
       },
@@ -3337,6 +3440,19 @@ async function handleClientEvent(event: ClientEvent): Promise<unknown> {
         setPermissionRules(
           (event.payload as { permissionRules: PermissionRule[] }).permissionRules
         );
+      }
+
+      if (typeof (event.payload as { autoApproveTools?: unknown }).autoApproveTools === 'boolean') {
+        configStore.update({
+          autoApproveTools: (event.payload as { autoApproveTools: boolean }).autoApproveTools,
+        });
+        sendToRenderer({
+          type: 'config.status',
+          payload: {
+            isConfigured: configStore.isConfigured(),
+            config: configStore.getAll(),
+          },
+        });
       }
       return null;
 

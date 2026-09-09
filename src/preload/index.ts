@@ -32,9 +32,9 @@ import type {
   McpTool,
   McpServerStatus,
   McpPresetsMap,
+  GoogleConnectionStatus,
   RemoteConfig,
   GatewayConfig,
-  FeishuChannelConfig,
   PairedUser,
   PairingRequest,
   RemoteSessionMapping,
@@ -245,6 +245,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getPresets: (): Promise<McpPresetsMap> => ipcRenderer.invoke('mcp.getPresets'),
   },
 
+  // Google Workspace connector methods
+  google: {
+    getStatus: (): Promise<GoogleConnectionStatus> => ipcRenderer.invoke('google.getStatus'),
+    saveClientCredentials: (payload: {
+      clientId: string;
+      clientSecret: string;
+    }): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('google.saveClientCredentials', payload),
+    connectAccount: (): Promise<{ success: boolean; accountEmail?: string; error?: string }> =>
+      ipcRenderer.invoke('google.connectAccount'),
+    disconnectAccount: (): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('google.disconnectAccount'),
+  },
+
   // Skills methods
   skills: {
     getAll: (): Promise<Skill[]> => ipcRenderer.invoke('skills.getAll'),
@@ -396,10 +410,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       config: Partial<GatewayConfig>
     ): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('remote.updateGatewayConfig', config),
-    updateFeishuConfig: (
-      config: FeishuChannelConfig
-    ): Promise<{ success: boolean; error?: string }> =>
-      ipcRenderer.invoke('remote.updateFeishuConfig', config),
     getPairedUsers: (): Promise<PairedUser[]> => ipcRenderer.invoke('remote.getPairedUsers'),
     getPendingPairings: (): Promise<PairingRequest[]> =>
       ipcRenderer.invoke('remote.getPendingPairings'),
@@ -549,6 +559,15 @@ declare global {
         getServerStatus: () => Promise<McpServerStatus[]>;
         getPresets: () => Promise<McpPresetsMap>;
       };
+      google: {
+        getStatus: () => Promise<GoogleConnectionStatus>;
+        saveClientCredentials: (payload: {
+          clientId: string;
+          clientSecret: string;
+        }) => Promise<{ success: boolean; error?: string }>;
+        connectAccount: () => Promise<{ success: boolean; accountEmail?: string; error?: string }>;
+        disconnectAccount: () => Promise<{ success: boolean; error?: string }>;
+      };
       skills: {
         getAll: () => Promise<Skill[]>;
         install: (skillPath: string) => Promise<{ success: boolean; skill: Skill }>;
@@ -669,9 +688,6 @@ declare global {
         setEnabled: (enabled: boolean) => Promise<{ success: boolean; error?: string }>;
         updateGatewayConfig: (
           config: Partial<GatewayConfig>
-        ) => Promise<{ success: boolean; error?: string }>;
-        updateFeishuConfig: (
-          config: FeishuChannelConfig
         ) => Promise<{ success: boolean; error?: string }>;
         getPairedUsers: () => Promise<PairedUser[]>;
         getPendingPairings: () => Promise<PairingRequest[]>;

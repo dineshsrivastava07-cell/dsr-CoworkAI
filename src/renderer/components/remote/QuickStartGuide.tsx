@@ -1,45 +1,18 @@
 /**
- * QuickStartGuide — step-by-step setup guide for Feishu/Lark bot integration
+ * QuickStartGuide — step-by-step setup guide for India-focused remote desktop use.
  */
 
 import { useTranslation } from 'react-i18next';
 
-interface Props {
-  permissionScopes: string[];
-  permissionSeparator: string;
-}
-
-export function QuickStartGuide({ permissionScopes, permissionSeparator }: Props) {
+export function QuickStartGuide() {
   const { t } = useTranslation();
 
   const steps = [
     { key: '1', content: <span>{t('remote.quickStartStep1')}</span> },
     { key: '2', content: <span>{t('remote.quickStartStep2')}</span> },
-    {
-      key: '3',
-      content: (
-        <span>
-          {t('remote.quickStartStep3')}
-          {permissionScopes.map((scope, index) => (
-            <span key={scope}>
-              <code className="px-1 py-0.5 bg-surface rounded ml-1">{scope}</code>
-              {index < permissionScopes.length - 1 ? permissionSeparator : ''}
-            </span>
-          ))}
-        </span>
-      ),
-    },
+    { key: '3', content: <span>{t('remote.quickStartStep3')}</span> },
     { key: '4', content: <span>{t('remote.quickStartStep4')}</span> },
-    {
-      key: '5',
-      content: (
-        <span>
-          {t('remote.quickStartStep5Prefix')}{' '}
-          <code className="px-1 py-0.5 bg-surface rounded">im.message.receive_v1</code>{' '}
-          {t('remote.quickStartStep5Suffix')}
-        </span>
-      ),
-    },
+    { key: '5', content: <span>{t('remote.quickStartStep5')}</span> },
     { key: '6', content: <span>{t('remote.quickStartStep6')}</span> },
   ];
 

@@ -1,7 +1,7 @@
 /**
  * Loop guard — detects runaway tool-call loops inside a single agent turn.
  *
- * Two-layer strategy:
+ * Three-layer strategy:
  *
  *   Layer 1  Hash-based group detection (consecutive streak)
  *     - Hash the entire tool-call list of each assistant message (MD5 over stable keys).
@@ -14,7 +14,19 @@
  *     - 5 in a row  → halt  (inject a hard "stop now, produce text" steering message)
  *     - 8 in a row  → abort (upstream gave up listening — kill the turn)
  *
- *   Layer 2  Per-tool frequency detection (no parameter comparison)
+ *   Layer 2  Tool-name-only consecutive streak (ignoring arguments)
+ *     - Same idea as Layer 1, but the group key is the ordered list of tool
+ *       *names* only — arguments are never inspected. Catches the case Layer 1
+ *       structurally cannot: the same tool (or same short sequence of tools)
+ *       invoked turn after turn with *different* arguments each time (e.g. a
+ *       browser-automation loop that calls new_page with a different URL on
+ *       every retry — the hash differs every time because the URL differs,
+ *       but the shape of what the model is doing does not).
+ *     - Thresholds are lower than Layer 1's because this signal is coarser
+ *       and therefore reached deliberately sooner: 4 in a row → warn,
+ *       7 → halt, 12 → abort.
+ *
+ *   Layer 3  Per-tool frequency detection (no parameter comparison)
  *     - Tracks cumulative invocations of each tool type within the turn.
  *     - Catches cross-parameter loops such as repeatedly reading *different* files.
  *     - 30 invocations → warn
@@ -55,6 +67,17 @@ export interface LoopGuardConfig {
   toolFrequencyAbortThreshold: number;
   /** Line-number bucket width used to collapse adjacent read_file ranges. */
   readFileLineBucketSize: number;
+  /** Same tool-name sequence (args ignored) repeated this many times in a row → soft warning. */
+  toolNameStreakWarnThreshold: number;
+  /** Same tool-name sequence (args ignored) repeated this many times in a row → hard halt steering. */
+  toolNameStreakHaltThreshold: number;
+  /** Same tool-name sequence (args ignored) repeated this many times in a row → unilateral abort. */
+  toolNameStreakAbortThreshold: number;
+  /** Consecutive user permission denials → soft warning steer message. */
+  permissionDenialWarnThreshold: number;
+  /** Consecutive user permission denials → unilateral abort. Denials are a much
+   * stronger "stop" signal than a tool-call loop, so this fires fast. */
+  permissionDenialAbortThreshold: number;
 }
 
 export const DEFAULT_LOOP_GUARD_CONFIG: LoopGuardConfig = {
@@ -66,6 +89,11 @@ export const DEFAULT_LOOP_GUARD_CONFIG: LoopGuardConfig = {
   toolFrequencyHaltThreshold: 50,
   toolFrequencyAbortThreshold: 80,
   readFileLineBucketSize: 200,
+  toolNameStreakWarnThreshold: 4,
+  toolNameStreakHaltThreshold: 7,
+  toolNameStreakAbortThreshold: 12,
+  permissionDenialWarnThreshold: 2,
+  permissionDenialAbortThreshold: 3,
 };
 
 export interface ToolCallDescriptor {
@@ -78,9 +106,14 @@ export type LoopGuardAction =
   | 'hash_warn'
   | 'hash_halt'
   | 'hash_abort'
+  | 'name_warn'
+  | 'name_halt'
+  | 'name_abort'
   | 'freq_warn'
   | 'freq_halt'
-  | 'freq_abort';
+  | 'freq_abort'
+  | 'permission_denial_warn'
+  | 'permission_denial_abort';
 
 export interface LoopGuardDecision {
   action: LoopGuardAction;
@@ -195,6 +228,18 @@ export function messageCallsHash(
   return md5(keys);
 }
 
+/**
+ * The ordered list of tool names for one assistant message, joined into a
+ * single key — arguments are deliberately never inspected. Two messages that
+ * call the same tool(s) in the same order share a key even if every argument
+ * differs, which is what lets the name-only streak layer catch "same move,
+ * different parameters" loops that {@link messageCallsHash} cannot.
+ */
+export function messageToolNamesKey(toolCalls: ToolCallDescriptor[]): string {
+  if (!toolCalls || toolCalls.length === 0) return '';
+  return toolCalls.map((tc) => tc.name || 'unknown').join('|');
+}
+
 // ─── LoopGuard class ────────────────────────────────────────────────────────
 
 export class LoopGuard {
@@ -208,10 +253,31 @@ export class LoopGuard {
   private streakWarnIssued = false;
   private streakHaltIssued = false;
   private streakAbortIssued = false;
+  /** The tool-names-only key (args ignored) of the most recently recorded message. */
+  private currentNameKey: string | null = null;
+  /** Length of the current consecutive run of `currentNameKey`. */
+  private currentNameStreak = 0;
+  private nameStreakWarnIssued = false;
+  private nameStreakHaltIssued = false;
+  private nameStreakAbortIssued = false;
   private readonly toolFrequency = new Map<string, number>();
   private readonly toolWarnIssued = new Set<string>();
   private readonly toolHaltIssued = new Set<string>();
   private readonly toolAbortIssued = new Set<string>();
+  /** Consecutive user permission denials. Reset to 0 on any allow. */
+  private consecutiveDenials = 0;
+  private denialWarnIssued = false;
+  private denialAbortIssued = false;
+  /**
+   * Set when recordPermissionDenial() crosses the abort threshold. The
+   * permission hook that calls it runs in a different closure/scope than the
+   * per-turn prompt() code (installed once at session creation, invoked
+   * across many turns), so it can't set prompt()'s local abortedByLoopGuard
+   * flag directly — the per-turn code reads this instead, via the same
+   * session-scoped LoopGuard instance, to suppress the generic "Cancelled"
+   * trace overwrite the same way a pattern-based loop abort already does.
+   */
+  private permissionAbortTriggered = false;
 
   constructor(config: Partial<LoopGuardConfig> = {}) {
     this.config = { ...DEFAULT_LOOP_GUARD_CONFIG, ...config };
@@ -227,8 +293,31 @@ export class LoopGuard {
   recordAssistantMessage(toolCalls: ToolCallDescriptor[]): LoopGuardDecision {
     if (!toolCalls || toolCalls.length === 0) return NOOP_DECISION;
 
+    // Both counters are updated unconditionally, every call — never short-circuited
+    // by the other layer firing. Otherwise a hash-layer decision on one call would
+    // skip that call's contribution to the name streak (or vice versa), leaving the
+    // two counters out of sync with the actual number of messages seen.
+    const previousHash = this.currentHash;
     const hash = messageCallsHash(toolCalls, this.config);
     this.pushHash(hash);
+    const hashDecision = this.evaluateHashStreak(hash);
+
+    // The name streak only advances on calls where the arguments actually changed
+    // from the previous call (hash differs). An exact repeat of the same tool +
+    // args is already owned exclusively by the hash layer above, at stricter
+    // thresholds — counting it here too would double-fire warnings for plain
+    // identical-call loops that Layer 1 already handles on its own.
+    const nameKey = messageToolNamesKey(toolCalls);
+    const argsChanged = hash !== previousHash;
+    this.pushNameKey(nameKey, argsChanged);
+    const nameDecision = this.evaluateNameStreak(nameKey);
+
+    // Hash-layer decisions take priority: identical args is a stronger signal
+    // than "same tool names, different args," and its thresholds are lower.
+    return hashDecision ?? nameDecision ?? NOOP_DECISION;
+  }
+
+  private evaluateHashStreak(hash: string): LoopGuardDecision | null {
     const count = this.currentStreak;
 
     if (count >= this.config.duplicateHashAbortThreshold && !this.streakAbortIssued) {
@@ -267,7 +356,37 @@ export class LoopGuard {
         }
       );
     }
-    return NOOP_DECISION;
+    return null;
+  }
+
+  private evaluateNameStreak(nameKey: string): LoopGuardDecision | null {
+    const nameCount = this.currentNameStreak;
+
+    if (nameCount >= this.config.toolNameStreakAbortThreshold && !this.nameStreakAbortIssued) {
+      this.nameStreakAbortIssued = true;
+      return this.mkDecision(
+        'name_abort',
+        `same tool(s) "${nameKey}" invoked ${nameCount} times in a row with varying arguments`,
+        { count: nameCount, toolName: nameKey }
+      );
+    }
+    if (nameCount >= this.config.toolNameStreakHaltThreshold && !this.nameStreakHaltIssued) {
+      this.nameStreakHaltIssued = true;
+      return this.mkDecision(
+        'name_halt',
+        `same tool(s) "${nameKey}" invoked ${nameCount} times in a row with varying arguments`,
+        { count: nameCount, toolName: nameKey }
+      );
+    }
+    if (nameCount >= this.config.toolNameStreakWarnThreshold && !this.nameStreakWarnIssued) {
+      this.nameStreakWarnIssued = true;
+      return this.mkDecision(
+        'name_warn',
+        `same tool(s) "${nameKey}" invoked ${nameCount} times in a row with varying arguments`,
+        { count: nameCount, toolName: nameKey }
+      );
+    }
+    return null;
   }
 
   /**
@@ -303,19 +422,82 @@ export class LoopGuard {
     return NOOP_DECISION;
   }
 
+  /**
+   * Record that the user denied a tool-call permission request. Call once per
+   * denial, regardless of which tool was denied — repeatedly denying *different*
+   * tools is just as strong a "stop asking" signal as denying the same one.
+   * Thresholds are deliberately low (default warn=2, abort=3): a denial is an
+   * explicit, unambiguous user action, not an inferred pattern like a tool loop.
+   */
+  recordPermissionDenial(): LoopGuardDecision {
+    this.consecutiveDenials += 1;
+    const count = this.consecutiveDenials;
+
+    if (count >= this.config.permissionDenialAbortThreshold && !this.denialAbortIssued) {
+      this.denialAbortIssued = true;
+      this.permissionAbortTriggered = true;
+      return this.mkDecision(
+        'permission_denial_abort',
+        `user denied ${count} tool-call permission requests in a row`,
+        { count }
+      );
+    }
+    if (count >= this.config.permissionDenialWarnThreshold && !this.denialWarnIssued) {
+      this.denialWarnIssued = true;
+      return this.mkDecision(
+        'permission_denial_warn',
+        `user denied ${count} tool-call permission requests in a row`,
+        { count }
+      );
+    }
+    return NOOP_DECISION;
+  }
+
+  /** Reset the denial streak — call when a tool call is allowed. */
+  recordPermissionAllow(): void {
+    this.consecutiveDenials = 0;
+    this.denialWarnIssued = false;
+    this.denialAbortIssued = false;
+  }
+
+  /** Whether recordPermissionDenial() has triggered an abort. See field doc above. */
+  wasAbortedByPermissionDenial(): boolean {
+    return this.permissionAbortTriggered;
+  }
+
   /** Expose raw counters for diagnostics / testing. */
   snapshot(): {
     currentHash: string | null;
     currentStreak: number;
+    currentNameKey: string | null;
+    currentNameStreak: number;
     toolFrequency: Record<string, number>;
     window: string[];
   } {
     return {
       currentHash: this.currentHash,
       currentStreak: this.currentStreak,
+      currentNameKey: this.currentNameKey,
+      currentNameStreak: this.currentNameStreak,
       toolFrequency: Object.fromEntries(this.toolFrequency),
       window: [...this.hashWindow],
     };
+  }
+
+  private pushNameKey(nameKey: string, argsChanged: boolean): void {
+    if (nameKey === this.currentNameKey) {
+      if (argsChanged) {
+        this.currentNameStreak += 1;
+      }
+      // else: exact duplicate of the previous call — already owned by the hash
+      // layer, so leave the name streak where it is rather than double-counting.
+    } else {
+      this.currentNameKey = nameKey;
+      this.currentNameStreak = 1;
+      this.nameStreakWarnIssued = false;
+      this.nameStreakHaltIssued = false;
+      this.nameStreakAbortIssued = false;
+    }
   }
 
   private pushHash(hash: string): void {
@@ -372,6 +554,18 @@ export function buildWarnSteerMessage(decision: LoopGuardDecision): string {
       'Please assess whether the information you have is sufficient to answer. If so, output a text conclusion directly; if not, use a different tool or more precise parameters.'
     );
   }
+  if (decision.action === 'name_warn') {
+    return (
+      `[Loop Guard · Warning] You have called "${decision.toolName}" ${decision.count} times in a row, each time with different arguments.\n` +
+      'Changing the arguments each time does not avoid the loop. Please reassess your approach — reuse the result of a prior call, or stop and explain to the user what is blocking progress.'
+    );
+  }
+  if (decision.action === 'permission_denial_warn') {
+    return (
+      `[Loop Guard · Warning] The user has denied ${decision.count} tool-call permission requests in a row.\n` +
+      'Stop proposing new tool calls. Ask the user directly, in plain text, what they actually want you to do instead.'
+    );
+  }
   return '[Loop Guard · Warning]';
 }
 
@@ -386,6 +580,12 @@ export function buildHaltSteerMessage(decision: LoopGuardDecision): string {
   if (decision.action === 'freq_halt') {
     return (
       `[Loop Guard · STOP] The tool "${decision.toolName}" has been invoked ${decision.count} times — this is a loop.\n` +
+      '**STOP all tool calls immediately. You must output the final conclusion in plain text based on the information you have already collected. Do not make any further tool calls.**'
+    );
+  }
+  if (decision.action === 'name_halt') {
+    return (
+      `[Loop Guard · STOP] "${decision.toolName}" has now been called ${decision.count} times in a row with varying arguments — this is a loop.\n` +
       '**STOP all tool calls immediately. You must output the final conclusion in plain text based on the information you have already collected. Do not make any further tool calls.**'
     );
   }
@@ -404,6 +604,19 @@ export function buildAbortUserMessage(decision: LoopGuardDecision): string {
     return (
       `**Loop Guard: Tool "${decision.toolName}" has been invoked ${decision.count} times in this turn, far exceeding reasonable limits. Session forcibly terminated.**` +
       LOOP_GUARD_GUIDANCE
+    );
+  }
+  if (decision.action === 'name_abort') {
+    return (
+      `**Loop Guard: The model continued calling "${decision.toolName}" ${decision.count} times in a row with varying arguments, even after receiving stop instructions. Session forcibly terminated.**` +
+      LOOP_GUARD_GUIDANCE
+    );
+  }
+  if (decision.action === 'permission_denial_abort') {
+    return (
+      `**Stopped: you denied ${decision.count} tool-call requests in a row, so I stopped trying.**\n\n` +
+      "Tell me what you'd actually like me to do — for example, a specific site to open, or say " +
+      '"just chat, no tools" if you want a text-only answer.'
     );
   }
   return (

@@ -9,6 +9,8 @@ import type {
   ScheduleWeekday,
   ScheduleCreateInput,
   ScheduleUpdateInput,
+  WatchCheckType,
+  WatchConfig,
 } from '../../types';
 import { useAppStore } from '../../store';
 import { formatAppDateTime, joinAppList } from '../../utils/i18n-format';
@@ -51,6 +53,13 @@ export function SettingsSchedule({ isActive }: { isActive: boolean }) {
   const [enabled, setEnabled] = useState(true);
   const [repeatEvery, setRepeatEvery] = useState(1);
   const [repeatUnit, setRepeatUnit] = useState<ScheduleRepeatUnit>('day');
+  const [taskKind, setTaskKind] = useState<'schedule' | 'watch'>('schedule');
+  const [watchCheckType, setWatchCheckType] = useState<WatchCheckType>('http');
+  const [watchUrl, setWatchUrl] = useState('');
+  const [watchMethod, setWatchMethod] = useState<'GET' | 'HEAD'>('GET');
+  const [watchCommand, setWatchCommand] = useState('');
+  const [watchCommandArgs, setWatchCommandArgs] = useState('');
+  const [watchPollMinutes, setWatchPollMinutes] = useState(5);
   const weekdayOptions = getWeekdayOptions(t);
   const scheduleModeOptions = getScheduleModeOptions(t);
   const promptChangedWhileEditing = Boolean(
@@ -120,11 +129,80 @@ export function SettingsSchedule({ isActive }: { isActive: boolean }) {
     return () => clearInterval(interval);
   }, [isActive, loadTasks]);
 
+  async function submitWatchTask(trimmedPrompt: string) {
+    if (watchCheckType === 'http' && !watchUrl.trim()) {
+      setError({ key: 'schedule.watchUrlRequired' });
+      return;
+    }
+    if (watchCheckType === 'command' && !watchCommand.trim()) {
+      setError({ key: 'schedule.watchCommandRequired' });
+      return;
+    }
+    const pollIntervalMs = Math.max(1, Math.round(watchPollMinutes)) * 60 * 1000;
+    const watchConfig: WatchConfig =
+      watchCheckType === 'http'
+        ? { checkType: 'http', http: { url: watchUrl.trim(), method: watchMethod }, pollIntervalMs }
+        : {
+            checkType: 'command',
+            command: {
+              command: watchCommand.trim(),
+              args: watchCommandArgs
+                .split(',')
+                .map((arg) => arg.trim())
+                .filter(Boolean),
+            },
+            pollIntervalMs,
+          };
+
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      if (editingId) {
+        const updated = await window.electronAPI.schedule.update(editingId, {
+          cwd: cwd.trim() || workingDir || '',
+          enabled,
+          prompt: trimmedPrompt,
+          watchConfig,
+          scheduleConfig: null,
+          repeatEvery: null,
+          repeatUnit: null,
+        });
+        if (!updated) {
+          throw new Error(t('schedule.taskMissing'));
+        }
+        setSuccess({ key: 'schedule.updated' });
+      } else {
+        const now = Date.now();
+        const payload: ScheduleCreateInput = {
+          prompt: trimmedPrompt,
+          cwd: cwd.trim() || workingDir || '',
+          runAt: now + pollIntervalMs,
+          nextRunAt: now + pollIntervalMs,
+          watchConfig,
+          enabled,
+        };
+        await window.electronAPI.schedule.create(payload);
+        setSuccess({ key: 'schedule.created' });
+      }
+      clearForm();
+      await loadTasks();
+    } catch (err) {
+      setError(err instanceof Error ? { text: err.message } : { key: 'schedule.saveFailed' });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   async function submitTask() {
     if (!isElectron) return;
     const trimmedPrompt = prompt.trim();
     if (!trimmedPrompt) {
       setError({ key: 'schedule.promptRequired' });
+      return;
+    }
+    if (taskKind === 'watch') {
+      await submitWatchTask(trimmedPrompt);
       return;
     }
     if (scheduleMode === 'daily' && (!scheduleConfig || scheduleConfig.times.length === 0)) {
@@ -327,13 +405,24 @@ export function SettingsSchedule({ isActive }: { isActive: boolean }) {
     setCwd(task.cwd);
     setRunAt(toLocalDateTimeInput(task.nextRunAt ?? task.runAt));
     setEnabled(task.enabled);
-    setScheduleMode(detectScheduleMode(task));
-    setSelectedTimes(task.scheduleConfig?.times ?? ['08:00']);
-    setSelectedWeekdays(
-      task.scheduleConfig?.kind === 'weekly' ? task.scheduleConfig.weekdays : [1]
-    );
-    setRepeatEvery(task.repeatEvery ?? 1);
-    setRepeatUnit(task.repeatUnit ?? 'day');
+    if (task.watchConfig) {
+      setTaskKind('watch');
+      setWatchCheckType(task.watchConfig.checkType);
+      setWatchUrl(task.watchConfig.http?.url ?? '');
+      setWatchMethod(task.watchConfig.http?.method ?? 'GET');
+      setWatchCommand(task.watchConfig.command?.command ?? '');
+      setWatchCommandArgs((task.watchConfig.command?.args ?? []).join(', '));
+      setWatchPollMinutes(Math.max(1, Math.round(task.watchConfig.pollIntervalMs / 60000)));
+    } else {
+      setTaskKind('schedule');
+      setScheduleMode(detectScheduleMode(task));
+      setSelectedTimes(task.scheduleConfig?.times ?? ['08:00']);
+      setSelectedWeekdays(
+        task.scheduleConfig?.kind === 'weekly' ? task.scheduleConfig.weekdays : [1]
+      );
+      setRepeatEvery(task.repeatEvery ?? 1);
+      setRepeatUnit(task.repeatUnit ?? 'day');
+    }
     setError(null);
     setSuccess(null);
   }
@@ -345,12 +434,19 @@ export function SettingsSchedule({ isActive }: { isActive: boolean }) {
     setPrompt('');
     setCwd(workingDir || '');
     setRunAt(toLocalDateTimeInput(defaultRunAt));
+    setTaskKind('schedule');
     setScheduleMode('once');
     setSelectedTimes(['08:00']);
     setSelectedWeekdays([1]);
     setEnabled(true);
     setRepeatEvery(1);
     setRepeatUnit('day');
+    setWatchCheckType('http');
+    setWatchUrl('');
+    setWatchMethod('GET');
+    setWatchCommand('');
+    setWatchCommandArgs('');
+    setWatchPollMinutes(5);
   }
 
   return (
@@ -396,105 +492,211 @@ export function SettingsSchedule({ isActive }: { isActive: boolean }) {
           placeholder={t('schedule.cwdPlaceholder')}
           className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm"
         />
-        <div className="rounded-lg border border-border bg-background p-3 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-sm font-medium text-text-primary">
-                {t('schedule.executionTime')}
-              </div>
-              <div className="text-xs text-text-muted">{t('schedule.executionTimeHint')}</div>
-            </div>
-            <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-sm text-text-secondary">
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
-              />
-              {t('schedule.enabled')}
-            </label>
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium text-text-muted">{t('schedule.kindLabel')}</div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setTaskKind('schedule')}
+              className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                taskKind === 'schedule'
+                  ? 'border-accent bg-accent/10 text-accent'
+                  : 'border-border bg-background text-text-secondary hover:bg-surface-hover'
+              }`}
+            >
+              {t('schedule.kindSchedule')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setTaskKind('watch')}
+              className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                taskKind === 'watch'
+                  ? 'border-accent bg-accent/10 text-accent'
+                  : 'border-border bg-background text-text-secondary hover:bg-surface-hover'
+              }`}
+            >
+              {t('schedule.kindWatch')}
+            </button>
           </div>
-          <div
-            className={`grid gap-2 ${scheduleMode === 'weekly' ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}
-          >
-            <ScheduleSelectMenu
-              label={t('schedule.mode')}
-              options={scheduleModeOptions}
-              value={scheduleMode}
-              onChange={(value) => setScheduleMode(value as ScheduleFormMode)}
-            />
-            {scheduleMode === 'weekly' && (
-              <ScheduleSelectMenu
-                label={t('schedule.weekday')}
-                options={weekdayOptions}
-                values={selectedWeekdays}
-                placeholder={t('schedule.weekdayPlaceholder')}
-                summary={selectedWeekdayLabels}
-                onToggle={(value) => {
-                  setSelectedWeekdays((current) =>
-                    toggleWeekdayValue(current, value as ScheduleWeekday)
-                  );
-                }}
-              />
-            )}
-            {(scheduleMode === 'daily' || scheduleMode === 'weekly') && (
-              <TimeMultiSelectMenu
-                label={t('schedule.times')}
-                values={selectedTimes}
-                placeholder={t('schedule.timePlaceholder')}
-                summary={selectedTimeLabels}
-                onAdd={(value) => setSelectedTimes((current) => toggleTimeValue(current, value))}
-                onRemove={(value) => setSelectedTimes((current) => toggleTimeValue(current, value))}
-              />
-            )}
-          </div>
-          {scheduleMode === 'legacy-interval' && (
-            <div className="rounded-lg border border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
-              {t('schedule.legacyIntervalNotice')}
-            </div>
-          )}
-          {(scheduleMode === 'once' || scheduleMode === 'legacy-interval') && (
-            <div className="space-y-2">
-              <div className="text-xs text-text-muted">
-                {scheduleMode === 'once'
-                  ? t('schedule.onceTimeLabel')
-                  : t('schedule.legacyStartTimeLabel')}
-              </div>
-              <input
-                type="datetime-local"
-                value={runAt}
-                onChange={(e) => setRunAt(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
-              />
-            </div>
-          )}
-          {scheduleMode === 'legacy-interval' && (
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                type="number"
-                min={1}
-                value={repeatEvery}
-                onChange={(e) => setRepeatEvery(Math.max(1, Number(e.target.value) || 1))}
-                className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
-              />
-              <select
-                value={repeatUnit}
-                onChange={(e) => setRepeatUnit(e.target.value as ScheduleRepeatUnit)}
-                className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
-              >
-                <option value="minute">{t('schedule.repeatUnitMinute')}</option>
-                <option value="hour">{t('schedule.repeatUnitHour')}</option>
-                <option value="day">{t('schedule.repeatUnitDay')}</option>
-              </select>
-            </div>
-          )}
-          {scheduleMode === 'daily' && (
-            <div className="text-xs text-text-muted">{t('schedule.dailyHint')}</div>
-          )}
-          {scheduleMode === 'weekly' && (
-            <div className="text-xs text-text-muted">{t('schedule.weeklyHint')}</div>
-          )}
-          <div className="text-xs text-text-muted">{schedulePreview}</div>
         </div>
+        {taskKind === 'watch' ? (
+          <div className="rounded-lg border border-border bg-background p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs text-text-muted">{t('schedule.watchHint')}</div>
+              <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-sm text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={(e) => setEnabled(e.target.checked)}
+                />
+                {t('schedule.enabled')}
+              </label>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <ScheduleSelectMenu
+                label={t('schedule.watchCheckType')}
+                options={[
+                  { value: 'http', label: t('schedule.watchCheckTypeHttp') },
+                  { value: 'command', label: t('schedule.watchCheckTypeCommand') },
+                ]}
+                value={watchCheckType}
+                onChange={(value) => setWatchCheckType(value as WatchCheckType)}
+              />
+              <LabeledField label={t('schedule.watchPollIntervalLabel')}>
+                <input
+                  type="number"
+                  min={1}
+                  value={watchPollMinutes}
+                  onChange={(e) => setWatchPollMinutes(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+                />
+              </LabeledField>
+            </div>
+            {watchCheckType === 'http' ? (
+              <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                <LabeledField label={t('schedule.watchUrlLabel')}>
+                  <input
+                    value={watchUrl}
+                    onChange={(e) => setWatchUrl(e.target.value)}
+                    placeholder={t('schedule.watchUrlPlaceholder')}
+                    className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+                  />
+                </LabeledField>
+                <LabeledField label={t('schedule.watchMethodLabel')}>
+                  <select
+                    value={watchMethod}
+                    onChange={(e) => setWatchMethod(e.target.value as 'GET' | 'HEAD')}
+                    className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+                  >
+                    <option value="GET">GET</option>
+                    <option value="HEAD">HEAD</option>
+                  </select>
+                </LabeledField>
+              </div>
+            ) : (
+              <div className="grid gap-2 md:grid-cols-2">
+                <LabeledField label={t('schedule.watchCommandLabel')}>
+                  <input
+                    value={watchCommand}
+                    onChange={(e) => setWatchCommand(e.target.value)}
+                    placeholder={t('schedule.watchCommandPlaceholder')}
+                    className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+                  />
+                </LabeledField>
+                <LabeledField label={t('schedule.watchCommandArgsLabel')}>
+                  <input
+                    value={watchCommandArgs}
+                    onChange={(e) => setWatchCommandArgs(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+                  />
+                </LabeledField>
+              </div>
+            )}
+            <div className="text-xs text-text-muted">{t('schedule.watchPollIntervalHint')}</div>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-border bg-background p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-medium text-text-primary">
+                  {t('schedule.executionTime')}
+                </div>
+                <div className="text-xs text-text-muted">{t('schedule.executionTimeHint')}</div>
+              </div>
+              <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-sm text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={(e) => setEnabled(e.target.checked)}
+                />
+                {t('schedule.enabled')}
+              </label>
+            </div>
+            <div
+              className={`grid gap-2 ${scheduleMode === 'weekly' ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}
+            >
+              <ScheduleSelectMenu
+                label={t('schedule.mode')}
+                options={scheduleModeOptions}
+                value={scheduleMode}
+                onChange={(value) => setScheduleMode(value as ScheduleFormMode)}
+              />
+              {scheduleMode === 'weekly' && (
+                <ScheduleSelectMenu
+                  label={t('schedule.weekday')}
+                  options={weekdayOptions}
+                  values={selectedWeekdays}
+                  placeholder={t('schedule.weekdayPlaceholder')}
+                  summary={selectedWeekdayLabels}
+                  onToggle={(value) => {
+                    setSelectedWeekdays((current) =>
+                      toggleWeekdayValue(current, value as ScheduleWeekday)
+                    );
+                  }}
+                />
+              )}
+              {(scheduleMode === 'daily' || scheduleMode === 'weekly') && (
+                <TimeMultiSelectMenu
+                  label={t('schedule.times')}
+                  values={selectedTimes}
+                  placeholder={t('schedule.timePlaceholder')}
+                  summary={selectedTimeLabels}
+                  onAdd={(value) => setSelectedTimes((current) => toggleTimeValue(current, value))}
+                  onRemove={(value) =>
+                    setSelectedTimes((current) => toggleTimeValue(current, value))
+                  }
+                />
+              )}
+            </div>
+            {scheduleMode === 'legacy-interval' && (
+              <div className="rounded-lg border border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
+                {t('schedule.legacyIntervalNotice')}
+              </div>
+            )}
+            {(scheduleMode === 'once' || scheduleMode === 'legacy-interval') && (
+              <div className="space-y-2">
+                <div className="text-xs text-text-muted">
+                  {scheduleMode === 'once'
+                    ? t('schedule.onceTimeLabel')
+                    : t('schedule.legacyStartTimeLabel')}
+                </div>
+                <input
+                  type="datetime-local"
+                  value={runAt}
+                  onChange={(e) => setRunAt(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+                />
+              </div>
+            )}
+            {scheduleMode === 'legacy-interval' && (
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  value={repeatEvery}
+                  onChange={(e) => setRepeatEvery(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+                />
+                <select
+                  value={repeatUnit}
+                  onChange={(e) => setRepeatUnit(e.target.value as ScheduleRepeatUnit)}
+                  className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
+                >
+                  <option value="minute">{t('schedule.repeatUnitMinute')}</option>
+                  <option value="hour">{t('schedule.repeatUnitHour')}</option>
+                  <option value="day">{t('schedule.repeatUnitDay')}</option>
+                </select>
+              </div>
+            )}
+            {scheduleMode === 'daily' && (
+              <div className="text-xs text-text-muted">{t('schedule.dailyHint')}</div>
+            )}
+            {scheduleMode === 'weekly' && (
+              <div className="text-xs text-text-muted">{t('schedule.weeklyHint')}</div>
+            )}
+            <div className="text-xs text-text-muted">{schedulePreview}</div>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <button
             onClick={submitTask}
@@ -557,15 +759,37 @@ export function SettingsSchedule({ isActive }: { isActive: boolean }) {
                         : t('schedule.nextRun', { value: formatTime(task.nextRunAt) })}
                     </div>
                     <div className="text-xs text-text-muted">
-                      {t('schedule.strategy', {
-                        value: formatScheduleRule(task, t, weekdayOptions),
-                      })}
+                      {task.watchConfig
+                        ? task.watchConfig.checkType === 'http'
+                          ? t('schedule.watchRuleHttp', { value: task.watchConfig.http?.url ?? '' })
+                          : t('schedule.watchRuleCommand', {
+                              value: task.watchConfig.command?.command ?? '',
+                            })
+                        : t('schedule.strategy', {
+                            value: formatScheduleRule(task, t, weekdayOptions),
+                          })}
                     </div>
                     <div className="text-xs text-text-muted">
                       {task.lastRunAt === null
                         ? t('schedule.lastRunNever')
                         : t('schedule.lastRun', { value: formatTime(task.lastRunAt) })}
                     </div>
+                    {task.watchConfig && (
+                      <div className="text-xs text-text-muted">
+                        {task.lastCheckedAt === null
+                          ? t('schedule.watchNeverChecked')
+                          : t('schedule.watchLastChecked', {
+                              value: formatTime(task.lastCheckedAt),
+                            })}
+                        {task.lastCheckedAt !== null &&
+                        task.lastRunAt !== null &&
+                        Math.abs(task.lastRunAt - task.lastCheckedAt) < 5000
+                          ? ` ${t('schedule.watchStateChanged')}`
+                          : task.lastCheckedAt !== null
+                            ? ` ${t('schedule.watchStateUnchanged')}`
+                            : ''}
+                      </div>
+                    )}
                     {task.lastRunSessionId && (
                       <div className="text-xs text-text-muted break-all">
                         {t('schedule.recentSession', { value: task.lastRunSessionId })}
@@ -841,6 +1065,15 @@ function isValidTimeValue(value: string): boolean {
 }
 
 // ==================== Schedule UI Sub-components ====================
+
+function LabeledField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block space-y-1.5">
+      <span className="text-xs font-medium text-text-muted">{label}</span>
+      {children}
+    </label>
+  );
+}
 
 function ScheduleSelectMenu(props: {
   label: string;

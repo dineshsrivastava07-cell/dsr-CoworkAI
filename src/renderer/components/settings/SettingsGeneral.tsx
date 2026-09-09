@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../store';
+import { useAppConfig } from '../../store/selectors';
 
 export function SettingsGeneral() {
   const { i18n, t } = useTranslation();
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
+  const appConfig = useAppConfig();
+  const autoApproveTools = appConfig?.autoApproveTools ?? false;
   const currentLang = i18n.language.startsWith('zh') ? 'zh' : 'en';
   const [appVer, setAppVer] = useState('');
   useEffect(() => {
@@ -68,12 +71,31 @@ export function SettingsGeneral() {
         </div>
       </div>
 
+      {/* Autonomous Mode */}
+      <div className="space-y-3">
+        <h4 className="text-sm font-medium text-text-primary">
+          {t('general.autonomousMode', 'Autonomous Mode')}
+        </h4>
+        <label className="flex items-start gap-3 p-3 rounded-lg border-2 border-border bg-surface cursor-pointer hover:border-accent/50 transition-all">
+          <input
+            type="checkbox"
+            checked={autoApproveTools}
+            onChange={(e) => updateSettings({ autoApproveTools: e.target.checked })}
+            className="mt-0.5 h-4 w-4 accent-accent"
+          />
+          <span className="text-sm text-text-secondary">
+            {t(
+              'general.autonomousModeDescription',
+              "Auto-approve tool calls that would otherwise wait for your click — useful for scheduled or unattended tasks. Doesn't override explicit deny rules or irreversible-action confirmations."
+            )}
+          </span>
+        </label>
+      </div>
+
       {/* About */}
       {appVer && (
         <div className="pt-4 border-t border-border">
-          <p className="text-xs text-text-muted">
-            dsr-CoworkAI v{appVer} · Developed by DSR AI Lab
-          </p>
+          <p className="text-xs text-text-muted">V-Coworker v{appVer} · Developed by DSR AI Lab</p>
         </div>
       )}
     </div>

@@ -25,7 +25,7 @@ describe('CoworkAgentRunner Open Cowork SDK integration', () => {
 
   it('uses standard markdown link guidance for sources citations', () => {
     expect(agentRunnerContent).toContain(
-      'otherwise use standard Markdown links: [Title](https://claude.ai/chat/URL)'
+      'otherwise use standard Markdown links: [Title](https://example.com)'
     );
   });
 
@@ -129,5 +129,16 @@ describe('CoworkAgentRunner Open Cowork SDK integration', () => {
       'Do NOT create, write, or edit files unless the user explicitly asks'
     );
     expect(agentRunnerContent).toContain('START DOING IT');
+  });
+
+  it('keeps local WBS artifact requests out of browser routing', () => {
+    expect(agentRunnerContent).toContain("return 'mcp__Office_Tools__create_excel';");
+    expect(agentRunnerContent).toContain(
+      'const earlyOfficeHandled = await this.tryDirectOfficeToolCall'
+    );
+    expect(agentRunnerContent).toContain(
+      'Browser tools withheld for non-browser/local-artifact request'
+    );
+    expect(agentRunnerContent).toContain('!this.isLocalArtifactIntent(prompt)');
   });
 });

@@ -24,14 +24,19 @@ export function PermissionDialog({ permission }: PermissionDialogProps) {
     return t('permission.useTool', { toolName });
   };
 
-  const isHighRisk = [
-    'bash',
-    'write',
-    'edit',
-    'execute_command',
-    'write_file',
-    'edit_file',
-  ].includes(permission.toolName);
+  const GUI_OPERATE_HIGH_RISK_ACTIONS = [
+    'mcp__GUI_Operate__click',
+    'mcp__GUI_Operate__drag',
+    'mcp__GUI_Operate__scroll',
+    'mcp__GUI_Operate__move_mouse',
+    'mcp__GUI_Operate__type_text',
+    'mcp__GUI_Operate__key_press',
+  ];
+
+  const isHighRisk =
+    ['bash', 'write', 'edit', 'execute_command', 'write_file', 'edit_file'].includes(
+      permission.toolName
+    ) || GUI_OPERATE_HIGH_RISK_ACTIONS.includes(permission.toolName);
 
   return (
     <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
@@ -109,9 +114,9 @@ export function PermissionDialog({ permission }: PermissionDialogProps) {
           <button
             onClick={() => {
               const dangerousTools = ['bash', 'write', 'edit', 'execute_command'];
-              const isDangerous = dangerousTools.some((tool) =>
-                permission.toolName?.toLowerCase().includes(tool)
-              );
+              const isDangerous =
+                dangerousTools.some((tool) => permission.toolName?.toLowerCase().includes(tool)) ||
+                GUI_OPERATE_HIGH_RISK_ACTIONS.includes(permission.toolName);
               if (isDangerous) {
                 setPendingAlwaysAllow(true);
               } else {

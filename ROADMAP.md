@@ -1,6 +1,6 @@
-# dsr-CoworkAI Roadmap
+# V-Coworker Roadmap
 
-> This document outlines the development direction for dsr-CoworkAI. For feature requests and discussion, see [GitHub Issues](https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/issues).
+> This document outlines the development direction for V-Coworker. For feature requests and discussion, see [GitHub Issues](https://github.com/dineshsrivastava07-cell/dsr-CoworkAI/issues).
 
 ## ✅ Completed
 
@@ -12,7 +12,7 @@
 - **Rich Input**: File upload and image input in chat
 - **Multi-Model**: Claude, GPT, Gemini, DeepSeek, Qwen, GLM, Kimi, Grok, MiniMax, Ollama
 - **UI/UX**: Enhanced interface with English/Chinese localization
-- **Remote Control**: Feishu (Lark) bot integration with pairing mode + approval panel
+- **Remote Control**: India-focused remote desktop/VNC configuration with pairing mode + approval panel
 - **CI/CD**: Automated builds, smoke tests, Codex-powered PR review bot
 - **Model Presets**: Up-to-date model catalogs for all major providers
 - **Dependency Policy**: Tiered management strategy with Dependabot grouping
@@ -27,7 +27,7 @@
 ### Near-term (v3.4.0)
 
 - **Sandbox Hardening**: Deep research and improvement of VM sandbox reliability, startup performance, and cross-platform consistency (Lima on macOS, WSL2 on Windows)
-- **App Slimming**: Reduce installer from ~156 MB to ~80 MB — on-demand Python/Node.js download, lazy-load Feishu SDK, strip unused files ([details](docs/SLIM-PLAN.md))
+- **App Slimming**: Reduce installer from ~156 MB to ~80 MB — on-demand Python/Node.js download, lazy-load optional SDKs, strip unused files ([details](docs/SLIM-PLAN.md))
 - **Code Cleanup**: Split god files (index.ts 2672 lines, gui-operate-server.ts 6884 lines), lazy imports, dead code removal
 - **Naming Standardization**: Clean up 75+ legacy references (claude-sdk, claude-sandbox, claude-plugin, pi-coding-agent) to consistent Open Cowork naming conventions
 - **Tool Completeness**: Implement native TodoWrite, AskUserQuestion, Glob, Grep, WebFetch, WebSearch tool schemas + handlers for API key users
