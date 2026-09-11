@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import type { MCPServerConfig, MCPServerStatus, MCPToolInfo, MCPPreset } from './shared';
 import { SettingsGoogleWorkspace } from './SettingsGoogleWorkspace';
+import { SettingsInfraRCA } from './SettingsInfraRCA';
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
@@ -194,6 +195,7 @@ export function SettingsConnectors({ isActive }: { isActive: boolean }) {
   return (
     <div className="space-y-4">
       <SettingsGoogleWorkspace isActive={isActive} />
+      <SettingsInfraRCA isActive={isActive} />
 
       {error && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-error/10 text-error text-sm">

@@ -1,25 +1,24 @@
-# 国际化 (i18n) 使用指南
+# Internationalization (i18n) Guide
 
-本项目使用 `react-i18next` 实现国际化支持，支持中英文切换。
+This project uses `react-i18next` for internationalization. Currently only English (`en`) is wired up (see `config.ts`) — the setup below is structured so additional locales can be added later without touching component code.
 
-## 架构优势
+## Why this structure
 
-✅ **代码中只用英文 key** - 无需 if-else，代码简洁  
-✅ **翻译集中管理** - 所有翻译在 JSON 文件中  
-✅ **类型安全** - TypeScript 支持  
-✅ **自动语言检测** - 根据浏览器语言自动选择  
-✅ **持久化** - 语言选择保存在 localStorage  
+✅ **Only English keys in code** - no if-else branching, code stays clean
+✅ **Centralized translations** - all copy lives in JSON files
+✅ **Type-safe** - TypeScript support
+✅ **Persisted** - language selection can be saved to localStorage once multiple locales exist
 
-## 基本用法
+## Basic usage
 
-### 1. 在组件中使用翻译
+### 1. Use translations in a component
 
 ```tsx
 import { useTranslation } from 'react-i18next';
 
 function MyComponent() {
   const { t } = useTranslation();
-  
+
   return (
     <div>
       <h1>{t('welcome.title')}</h1>
@@ -29,7 +28,7 @@ function MyComponent() {
 }
 ```
 
-### 2. 带变量的翻译
+### 2. Translations with variables
 
 ```tsx
 // en.json
@@ -39,11 +38,11 @@ function MyComponent() {
   }
 }
 
-// 使用
+// Usage
 {t('welcome.greeting', { name: 'John' })}
 ```
 
-### 3. 复数形式
+### 3. Plural forms
 
 ```tsx
 // en.json
@@ -54,62 +53,34 @@ function MyComponent() {
   }
 }
 
-// 使用
+// Usage
 {t('mcp.toolsAvailable', { count: 1 })} // "1 tool available"
 {t('mcp.toolsAvailable', { count: 5 })} // "5 tools available"
 ```
 
-### 4. 切换语言
+## Adding a new locale
 
-```tsx
-import { useTranslation } from 'react-i18next';
+1. Add a `src/renderer/i18n/locales/<lang>.json` file mirroring the structure of `en.json`.
+2. Register it in `config.ts`'s `resources` map and add it to `supportedLngs`.
+3. Add a language switcher UI component if you want users to pick a locale at runtime (none exists yet — `config.ts` currently pins `lng: 'en'`).
 
-function LanguageSwitcher() {
-  const { i18n } = useTranslation();
-  
-  const changeLanguage = (lang: 'en' | 'zh') => {
-    i18n.changeLanguage(lang);
-  };
-  
-  return (
-    <button onClick={() => changeLanguage('zh')}>中文</button>
-  );
-}
-```
+## Translation file structure
 
-## 添加新翻译
-
-1. 在 `src/renderer/i18n/locales/en.json` 添加英文翻译
-2. 在 `src/renderer/i18n/locales/zh.json` 添加中文翻译
-3. 使用 `t('key.path')` 在代码中引用
-
-## 翻译文件结构
-
-建议按功能模块组织：
+Organize by feature area:
 
 ```json
 {
-  "common": { ... },      // 通用词汇
-  "welcome": { ... },     // 欢迎页
-  "settings": { ... },    // 设置页
-  "mcp": { ... },         // MCP 相关
-  "credentials": { ... }  // 凭证相关
+  "common": { ... },      // shared vocabulary
+  "welcome": { ... },     // welcome screen
+  "settings": { ... },    // settings screen
+  "mcp": { ... },         // MCP-related
+  "credentials": { ... }  // credentials-related
 }
 ```
 
-## 语言切换组件
+## Best practices
 
-已创建 `LanguageSwitcher` 组件，可以在任何地方使用：
-
-```tsx
-import { LanguageSwitcher } from './components/LanguageSwitcher';
-
-<LanguageSwitcher />
-```
-
-## 最佳实践
-
-1. **使用有意义的 key** - `welcome.title` 而不是 `text1`
-2. **保持层级一致** - 英文和中文的 JSON 结构要完全一致
-3. **避免硬编码** - 所有用户可见的文本都应该通过 `t()` 函数
-4. **命名空间** - 使用点号分隔的层级结构组织翻译
+1. **Use meaningful keys** - `welcome.title` rather than `text1`
+2. **Keep structure consistent** - if you add more locale files, their JSON structure should match `en.json` exactly
+3. **Avoid hardcoding** - all user-visible text should go through the `t()` function
+4. **Namespacing** - use dot-separated hierarchical keys to organize translations

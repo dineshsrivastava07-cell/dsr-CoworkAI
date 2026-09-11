@@ -33,6 +33,8 @@ import type {
   McpServerStatus,
   McpPresetsMap,
   GoogleConnectionStatus,
+  InfraRcaTargetPublic,
+  InfraRcaTargetInput,
   RemoteConfig,
   GatewayConfig,
   PairedUser,
@@ -257,6 +259,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('google.connectAccount'),
     disconnectAccount: (): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('google.disconnectAccount'),
+  },
+
+  // Infra RCA target methods — secrets never round-trip through these calls
+  // beyond the initial save; listTargets only ever returns name/protocol/host.
+  infraRca: {
+    listTargets: (): Promise<InfraRcaTargetPublic[]> => ipcRenderer.invoke('infraRca.listTargets'),
+    saveTarget: (
+      target: InfraRcaTargetInput
+    ): Promise<{ success: boolean; id?: string; error?: string }> =>
+      ipcRenderer.invoke('infraRca.saveTarget', target),
+    deleteTarget: (id: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('infraRca.deleteTarget', id),
+    testConnection: (
+      id: string
+    ): Promise<{ reachable: boolean; latencyMs?: number; error?: string }> =>
+      ipcRenderer.invoke('infraRca.testConnection', id),
   },
 
   // Skills methods
@@ -567,6 +585,16 @@ declare global {
         }) => Promise<{ success: boolean; error?: string }>;
         connectAccount: () => Promise<{ success: boolean; accountEmail?: string; error?: string }>;
         disconnectAccount: () => Promise<{ success: boolean; error?: string }>;
+      };
+      infraRca: {
+        listTargets: () => Promise<InfraRcaTargetPublic[]>;
+        saveTarget: (
+          target: InfraRcaTargetInput
+        ) => Promise<{ success: boolean; id?: string; error?: string }>;
+        deleteTarget: (id: string) => Promise<{ success: boolean; error?: string }>;
+        testConnection: (
+          id: string
+        ) => Promise<{ reachable: boolean; latencyMs?: number; error?: string }>;
       };
       skills: {
         getAll: () => Promise<Skill[]>;

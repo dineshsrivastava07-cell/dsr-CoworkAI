@@ -85,6 +85,20 @@ export const MCP_SERVER_PRESETS: Record<
       // injected transiently at spawn time by mcp-manager.ts, never persisted here.
     },
   },
+  'infra-rca': {
+    name: 'Infra_RCA',
+    type: 'stdio',
+    command: 'node',
+    args: ['{INFRA_RCA_SERVER_PATH}'], // Path will be resolved at runtime (compiled JS in production)
+    env: {},
+    requiresEnv: [],
+    envDescription: {
+      // No environment variables required — broker port/secret are injected
+      // transiently at spawn time by mcp-manager.ts, never persisted here.
+      // Target credentials live in infra-rca-store.ts, resolved on demand via
+      // infra-rca-broker.ts — never passed to this server as env or config.
+    },
+  },
 };
 
 function isOfficeToolsServerName(name: string): boolean {
@@ -166,6 +180,11 @@ class MCPConfigStore {
 
     if (!hasOfficeToolsConfig) {
       enabledServers.push(this.createBuiltinOfficeToolsConfig());
+    }
+
+    const hasInfraRcaConfig = servers.some((server) => server.name === 'Infra_RCA');
+    if (!hasInfraRcaConfig) {
+      enabledServers.push(this.createBuiltinInfraRcaConfig());
     }
 
     return enabledServers;
@@ -276,6 +295,13 @@ class MCPConfigStore {
     return this.getMcpServerPath('google-workspace-server.ts');
   }
 
+  /**
+   * Get the path to the Infra RCA MCP server file
+   */
+  private getInfraRcaServerPath(): string | null {
+    return this.getMcpServerPath('infra-rca-server.ts');
+  }
+
   private createBuiltinOfficeToolsConfig(): MCPServerConfig {
     const preset = MCP_SERVER_PRESETS['office-tools'];
     return {
@@ -284,6 +310,18 @@ class MCPConfigStore {
         arg === '{OFFICE_TOOLS_SERVER_PATH}' ? this.getOfficeToolsServerPath() || arg : arg
       ),
       id: 'mcp-office-tools-builtin',
+      enabled: true,
+    };
+  }
+
+  private createBuiltinInfraRcaConfig(): MCPServerConfig {
+    const preset = MCP_SERVER_PRESETS['infra-rca'];
+    return {
+      ...preset,
+      args: preset.args?.map((arg) =>
+        arg === '{INFRA_RCA_SERVER_PATH}' ? this.getInfraRcaServerPath() || arg : arg
+      ),
+      id: 'mcp-infra-rca-builtin',
       enabled: true,
     };
   }
@@ -317,6 +355,9 @@ class MCPConfigStore {
           }
           if (arg === '{GOOGLE_WORKSPACE_SERVER_PATH}') {
             return this.getGoogleWorkspaceServerPath() || arg;
+          }
+          if (arg === '{INFRA_RCA_SERVER_PATH}') {
+            return this.getInfraRcaServerPath() || arg;
           }
           return arg;
         }),

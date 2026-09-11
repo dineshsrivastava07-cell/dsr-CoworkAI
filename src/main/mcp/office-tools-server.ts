@@ -43,10 +43,27 @@ interface ExcelChartDef {
   value_column: number;
 }
 
+interface ExcelFormulaCell {
+  /** Excel formula without the leading '=', e.g. "NPV(0.1,B2:B10)+B1", "STDEV(B2:B10)", "SUM(B2:B10)". */
+  formula: string;
+  /** Optional display format, e.g. '$#,##0.00', '0.00%', '#,##0'. */
+  numFmt?: string;
+}
+
+type ExcelCellValue = string | number | boolean | null | ExcelFormulaCell;
+
+function isExcelFormulaCell(value: unknown): value is ExcelFormulaCell {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as ExcelFormulaCell).formula === 'string'
+  );
+}
+
 interface ExcelSheetDef {
   name: string;
   headers: string[];
-  rows: (string | number | boolean | null)[][];
+  rows: ExcelCellValue[][];
   column_widths?: number[];
   freeze_header?: boolean;
   add_totals_row?: boolean;
@@ -96,7 +113,10 @@ async function createExcel(params: CreateExcelParams): Promise<string> {
 
     // Data rows
     for (const row of sheetDef.rows || []) {
-      const dataRow = ws.addRow(row);
+      const rowValues = row.map((cell) =>
+        isExcelFormulaCell(cell) ? { formula: cell.formula } : cell
+      );
+      const dataRow = ws.addRow(rowValues);
       dataRow.eachCell({ includeEmpty: true }, (cell, colNum) => {
         // Zebra striping
         const rowIdx = dataRow.number;
@@ -110,10 +130,15 @@ async function createExcel(params: CreateExcelParams): Promise<string> {
         cell.border = {
           bottom: { style: 'hair', color: { argb: 'FFB8CCE4' } },
         };
-        // Auto-align numbers right
-        if (typeof row[colNum - 1] === 'number') {
+        const orig = row[colNum - 1];
+        if (isExcelFormulaCell(orig)) {
+          // Formula results are typically numeric — right-align and apply the
+          // caller's format (e.g. '$#,##0.00', '0.00%') or a sensible default.
           cell.alignment = { horizontal: 'right' };
-          cell.numFmt = Number.isInteger(row[colNum - 1]) ? '#,##0' : '#,##0.00';
+          cell.numFmt = orig.numFmt || '#,##0.00';
+        } else if (typeof orig === 'number') {
+          cell.alignment = { horizontal: 'right' };
+          cell.numFmt = Number.isInteger(orig) ? '#,##0' : '#,##0.00';
         }
       });
     }
@@ -161,7 +186,10 @@ async function createExcel(params: CreateExcelParams): Promise<string> {
       sheetDef.headers.forEach((h, i) => {
         const maxLen = Math.max(
           h.length,
-          ...(sheetDef.rows || []).map((r) => String(r[i] ?? '').length)
+          ...(sheetDef.rows || []).map((r) => {
+            const cell = r[i];
+            return isExcelFormulaCell(cell) ? 12 : String(cell ?? '').length;
+          })
         );
         ws.getColumn(i + 1).width = Math.min(Math.max(maxLen + 4, 12), 40);
       });
@@ -2343,7 +2371,7 @@ function createMcpServer() {
         {
           name: 'create_excel',
           description:
-            'Create an Excel (.xlsx) spreadsheet with one or more sheets. Supports styled headers, data rows, auto-totals, column widths, and frozen header rows. Use this whenever the user asks for a spreadsheet, table of data, report, tracker, or anything in Excel format.',
+            'Create an Excel (.xlsx) spreadsheet with one or more sheets. Supports styled headers, data rows, auto-totals, column widths, frozen header rows, and live formula cells (e.g. NPV, IRR, STDEV, AVERAGE, TREND, growth-rate calculations). Use this whenever the user asks for a spreadsheet, table of data, financial model, statistical analysis, report, tracker, or anything in Excel format.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -2382,10 +2410,28 @@ function createMcpServer() {
                       type: 'array',
                       items: {
                         type: 'array',
-                        items: { type: ['string', 'number', 'boolean', 'null'] },
+                        items: {
+                          oneOf: [
+                            { type: ['string', 'number', 'boolean', 'null'] },
+                            {
+                              type: 'object',
+                              description:
+                                'Live formula cell for financial/statistical calculations, e.g. {"formula":"NPV(0.1,B2:B10)"}, {"formula":"IRR(B2:B10)"}, {"formula":"STDEV(B2:B10)"}, {"formula":"(B10-B2)/B2","numFmt":"0.00%"} for growth rate. formula excludes the leading "=". Cell references use standard Excel A1 notation relative to this sheet.',
+                              properties: {
+                                formula: { type: 'string' },
+                                numFmt: {
+                                  type: 'string',
+                                  description:
+                                    "Optional display format, e.g. '$#,##0.00', '0.00%'.",
+                                },
+                              },
+                              required: ['formula'],
+                            },
+                          ],
+                        },
                       },
                       description:
-                        'Data rows — each row is an array of cell values matching headers order',
+                        'Data rows — each row is an array of cell values matching headers order. Cells can be plain values or formula objects for calculations.',
                     },
                     column_widths: {
                       type: 'array',

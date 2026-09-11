@@ -68,6 +68,19 @@ describe('MCPConfigStore Office Tools defaults', () => {
       },
     ]);
 
-    expect(mcpConfigStore.getEnabledServers()).toEqual([]);
+    const servers = mcpConfigStore.getEnabledServers();
+    expect(servers.find((server) => server.name === 'Office_Tools')).toBeUndefined();
+  });
+
+  it('includes Infra RCA as an implicit enabled built-in server', () => {
+    const servers = mcpConfigStore.getEnabledServers();
+    const infraRca = servers.find((server) => server.name === 'Infra_RCA');
+
+    expect(infraRca).toBeDefined();
+    expect(infraRca?.id).toBe('mcp-infra-rca-builtin');
+    expect(infraRca?.enabled).toBe(true);
+    expect(infraRca?.command).toBe('node');
+    expect(infraRca?.args?.[0]).toContain('infra-rca-server');
+    expect(infraRca?.args?.[0]).not.toBe('{INFRA_RCA_SERVER_PATH}');
   });
 });

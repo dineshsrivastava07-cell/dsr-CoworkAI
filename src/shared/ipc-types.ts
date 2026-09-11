@@ -76,6 +76,36 @@ export interface GoogleConnectionStatus {
 }
 
 // ---------------------------------------------------------------------------
+// Infra RCA
+// ---------------------------------------------------------------------------
+
+export type InfraRcaProtocol = 'ssh' | 'winrm' | 'snmp' | 'db';
+
+/** Public view of a configured target — name/protocol/host only, never secrets. */
+export interface InfraRcaTargetPublic {
+  id: string;
+  name: string;
+  protocol: InfraRcaProtocol;
+  host: string;
+}
+
+/** Renderer -> main payload for saving a target. Secrets flow one-way into the encrypted store and are never read back. */
+export interface InfraRcaTargetInput {
+  id?: string;
+  name: string;
+  protocol: InfraRcaProtocol;
+  host: string;
+  port?: number;
+  username?: string;
+  secret?: string;
+  privateKey?: string;
+  passphrase?: string;
+  community?: string;
+  dbEngine?: 'postgres' | 'mysql';
+  dbName?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Remote
 // ---------------------------------------------------------------------------
 
