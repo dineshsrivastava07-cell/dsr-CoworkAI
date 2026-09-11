@@ -87,7 +87,7 @@
     "mysql2": "3.24.4",
     "net-snmp": "3.26.3",
     "ngrok": "^5.0.0-beta.2",
-    "openai": "^6.32.0",
+    "openai": "^7.10.0",
     "patch-package": "8.0.1",
     "pdf-parse": "1.1.4",
     "pg": "8.23.0",
