@@ -414,6 +414,28 @@ export class MCPManager {
   }
 
   /**
+   * Infra_RCA has no credentials of its own — it resolves a target's real
+   * secret on demand from the main process's infra-rca broker, by name only,
+   * so passwords/keys never appear in this server's own env, config, or the
+   * model's context. Loaded via dynamic import for the same reason as
+   * getGoogleWorkspaceEnvOverrides — keep this optional/best-effort.
+   */
+  private async getInfraRcaEnvOverrides(): Promise<Record<string, string>> {
+    try {
+      const { getInfraRcaBrokerConnectionInfo } = await import('./infra-rca-broker');
+      const info = getInfraRcaBrokerConnectionInfo();
+      if (!info) return {};
+      return {
+        INFRA_RCA_BROKER_PORT: String(info.port),
+        INFRA_RCA_BROKER_SECRET: info.secret,
+      };
+    } catch (error) {
+      logWarn('[MCPManager] Could not read Infra RCA broker connection info:', error);
+      return {};
+    }
+  }
+
+  /**
    * Get enhanced environment with proper PATH for packaged app
    * This is critical for packaged apps where process.env is very limited
    */
@@ -814,6 +836,13 @@ export class MCPManager {
   }
 
   /**
+   * Get the path to the Infra RCA MCP server file
+   */
+  private getInfraRcaServerPath(): string {
+    return this.getMcpServerPath('infra-rca-server.ts');
+  }
+
+  /**
    * Connect to a single MCP server
    */
   private async connectServer(config: MCPServerConfig): Promise<void> {
@@ -879,7 +908,9 @@ export class MCPManager {
         config.name === 'Weather_Tools' ||
         config.name === 'Weather Tools' ||
         config.name === 'Google_Workspace' ||
-        config.name === 'Google Workspace';
+        config.name === 'Google Workspace' ||
+        config.name === 'Infra_RCA' ||
+        config.name === 'Infra RCA';
       const isOldConfig =
         (command === 'npx' || command.endsWith('/npx')) &&
         args.includes('-y') &&
@@ -919,6 +950,9 @@ export class MCPManager {
         if (arg === '{GOOGLE_WORKSPACE_SERVER_PATH}') {
           return this.getGoogleWorkspaceServerPath();
         }
+        if (arg === '{INFRA_RCA_SERVER_PATH}') {
+          return this.getInfraRcaServerPath();
+        }
         return arg;
       });
 
@@ -952,6 +986,14 @@ export class MCPManager {
       // access token from the main process's token broker on every call.
       if (config.name === 'Google_Workspace' || config.name === 'Google Workspace') {
         Object.assign(config.env ?? (config.env = {}), await this.getGoogleWorkspaceEnvOverrides());
+      }
+
+      // Infra_RCA has no credentials of its own — it resolves a target's real
+      // secret on demand from the main process's infra-rca broker, by name
+      // only. Secrets never appear in this server's env, config, or the
+      // model's context.
+      if (config.name === 'Infra_RCA' || config.name === 'Infra RCA') {
+        Object.assign(config.env ?? (config.env = {}), await this.getInfraRcaEnvOverrides());
       }
 
       // Get environment variables before resolving npx so Windows can prefer a
@@ -997,6 +1039,7 @@ export class MCPManager {
         ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY?.trim() ? 'set' : 'unset',
         ANTHROPIC_AUTH_TOKEN: env.ANTHROPIC_AUTH_TOKEN?.trim() ? 'set' : 'unset',
         GOOGLE_TOKEN_BROKER_SECRET: env.GOOGLE_TOKEN_BROKER_SECRET?.trim() ? 'set' : 'unset',
+        INFRA_RCA_BROKER_SECRET: env.INFRA_RCA_BROKER_SECRET?.trim() ? 'set' : 'unset',
       });
 
       // In production, set NODE_PATH to include unpacked node_modules
@@ -1775,7 +1818,8 @@ export class MCPManager {
 
         const toolErrorMessage = extractStructuredToolErrorMessage(result);
         if (shouldReconnectOnStructuredToolError(toolErrorMessage)) {
-          // 某些 MCP 服务会把连接错误包在结构化结果里而非直接抛异常，这里转为异常以复用统一重连逻辑。
+          // Some MCP servers wrap connection errors in a structured result instead of throwing;
+          // convert to a real exception here so it reuses the shared reconnect logic.
           throw new Error(toolErrorMessage);
         }
         if (

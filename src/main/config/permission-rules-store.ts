@@ -25,6 +25,15 @@ const DEFAULT_RULES: PermissionRule[] = [
   { tool: 'write', action: 'ask' },
   { tool: 'edit', action: 'ask' },
   { tool: 'bash', action: 'ask' },
+  // Infra RCA: read-only/side-effect-free tools default to allow, same as
+  // read/glob/grep above. infra_execute_fix is deliberately left unmatched
+  // (falls through to 'ask') on top of its own confirm_fix/proposal_id
+  // refusal inside the tool itself — two independent layers, since it can
+  // mutate real infrastructure.
+  { tool: 'mcp__Infra_RCA__infra_list_targets', action: 'allow' },
+  { tool: 'mcp__Infra_RCA__infra_diagnose', action: 'allow' },
+  { tool: 'mcp__Infra_RCA__infra_propose_fix', action: 'allow' },
+  { tool: 'mcp__Infra_RCA__infra_ping_check', action: 'allow' },
 ];
 
 const VALID_ACTIONS: ReadonlySet<PermissionRule['action']> = new Set(['allow', 'deny', 'ask']);

@@ -36,7 +36,7 @@ export function normalizeGeneratedTitle(value: string | null | undefined): strin
 export function buildTitlePrompt(prompt: string): string {
   return [
     'Generate a short title for the following user request. Rules:',
-    '- Max 15 characters (Chinese) or 6 words (English)',
+    '- Max 15 characters if using a non-Latin script, or 6 words otherwise',
     '- Reply in the same language as the user request',
     '- No quotes, numbering, or punctuation at the end',
     '',

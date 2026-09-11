@@ -61,6 +61,15 @@ const servers = [
     // different underlying reason) and dynamic-import it at call time.
     extraExternals: ['pdf-parse'],
   },
+  {
+    name: 'infra-rca-server',
+    entry: 'infra-rca-server.ts',
+    description: 'Infra RCA MCP Server (SSH/WinRM/SNMP/DB diagnostics)',
+    // ssh2 (and its optional cpu-features dependency) ships a native .node
+    // binary that esbuild cannot inline — keep these real on-disk packages,
+    // same treatment tesseract.js/pdf-parse need above for their own reasons.
+    extraExternals: ['ssh2', 'cpu-features', 'net-snmp', 'pg', 'mysql2', '@netcuras/nodejs-winrm'],
+  },
 ];
 
 const NODE_EXTERNALS = [

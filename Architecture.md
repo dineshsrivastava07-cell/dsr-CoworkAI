@@ -45,11 +45,12 @@ graph TB
 
     subgraph MCPSERVERS["Bundled MCP Servers"]
         CHROME[Chrome\nbrowser automation]
-        GUIOP[GUI_Operate\ndesktop/app RPA]
+        GUIOP[GUI_Operate\ndesktop/app RPA + recipes]
         OFFICE[Office_Tools\nExcel/Word/PPT]
         GWORK[Google_Workspace\nGmail/Drive/Calendar]
         OCR[OCR_Tools\nTesseract]
         WEATHER[Weather_Tools\nOpen-Meteo]
+        INFRA[Infra_RCA\nSSH/WinRM/SNMP/DB diagnostics]
     end
 
     subgraph EXT["External Integrations"]
@@ -66,7 +67,7 @@ graph TB
     AR -->|API key| ANTH
     AR -->|API key| OPENROUTER
     AR -->|tool calls, permission-gated| MCP
-    MCP --> CHROME & GUIOP & OFFICE & GWORK & OCR & WEATHER
+    MCP --> CHROME & GUIOP & OFFICE & GWORK & OCR & WEATHER & INFRA
     AR -->|skill execution| SKL
     AR -->|read/write, no-fabrication guardrail| MEM
     AR -->|shell isolation| SBX
@@ -157,13 +158,14 @@ flowchart LR
     MCPMgr --> Reg{Tool Registry}
     Reg --> FS[Built-in: read/write/edit/glob/grep/bash]
     Reg --> BR[Chrome\nbrowser automation]
-    Reg --> RPA[GUI_Operate\ndesktop/app RPA, 19 tools]
+    Reg --> RPA[GUI_Operate\ndesktop/app RPA 19 tools\nplus 5 recipe tools]
     Reg --> OT[Office_Tools\ncreate_excel / create_word_document\ncreate_presentation]
     Reg --> GW[Google_Workspace\nGmail/Drive/Calendar]
     Reg --> OCR[OCR_Tools]
     Reg --> WX[Weather_Tools]
+    Reg --> IRCA[Infra_RCA\ndiagnose / propose_fix / execute_fix]
     Reg --> CUS[Optional presets:\nNotion, Software_Development,\nany custom MCP server]
-    FS & BR & RPA & OT & GW & OCR & WX & CUS -->|result, truncated if >20,000 chars| MCPMgr
+    FS & BR & RPA & OT & GW & OCR & WX & IRCA & CUS -->|result, truncated if >20,000 chars| MCPMgr
     MCPMgr -->|result| AR
 ```
 
@@ -260,6 +262,59 @@ Unattended/scheduled sessions previously stalled on the same 60-second permissio
 
 ---
 
+## Infra RCA — Remote Infrastructure Diagnostics
+
+`Infra_RCA` is a bundled, always-enabled MCP server that diagnoses remote systems — Linux/Unix servers (SSH), Windows servers (WinRM/PowerShell, best-effort), network gear/printers/UPS (SNMP via standard IETF MIBs), and Postgres/MySQL (direct connection) — and proposes fixes, but **never auto-executes one**. Credentials for each named target live in a dedicated encrypted store and are resolved by the MCP server child process on demand via a loopback broker in the main process (the same pattern `Google_Workspace` uses for OAuth tokens) — they never appear in the model's context.
+
+```mermaid
+flowchart TD
+    U([User asks why a server is slow]) --> DIAG[infra_diagnose target category]
+    DIAG --> DRV{Target protocol}
+    DRV -- ssh --> SSH[SSH driver: df/free/uptime/\nsystemctl --failed]
+    DRV -- winrm --> WINRM[WinRM driver: PowerShell\nGet-PSDrive/Get-CimInstance/etc]
+    DRV -- snmp --> SNMP[SNMP driver: HOST-RESOURCES-MIB/\nIF-MIB/Printer-MIB/UPS-MIB]
+    DRV -- db --> DB[DB driver: pg/mysql2\nconnection count, slow queries]
+    SSH & WINRM & SNMP & DB --> RESULT[Structured metrics +\nroot-cause hypothesis]
+    RESULT --> PROPOSE[infra_propose_fix\ncommand + risk level + proposal_id\nNEVER executes]
+    PROPOSE --> SHOW[Agent shows the exact command\nto the user in chat]
+    SHOW --> APPROVE{User approves?}
+    APPROVE -- yes --> EXEC["infra_execute_fix\nrequires confirm_fix=true AND\nthe exact proposal_id"]
+    APPROVE -- no --> STOP2([Nothing runs])
+    EXEC --> RUN2[Executes ONLY the\npreviously-proposed command]
+```
+
+Two independent safety layers on `infra_execute_fix`, both inside the tool's own body (so — like GUI_Operate's `confirm_irreversible` — Autonomous Mode's permission-dialog bypass never reaches them): it refuses without `confirm_fix: true`, and it refuses unless `proposal_id` matches a real, unexpired proposal for that exact target — the model cannot substitute a different command than the one actually shown to the user. Read-only tools (`infra_list_targets`, `infra_diagnose`, `infra_propose_fix`, `infra_ping_check`) default to `allow`; `infra_execute_fix` is deliberately left at the `ask` fallback on top of its own refusal.
+
+DVR/camera (ONVIF) support is intentionally not built — no vendor/model was specified, and it's wired as a pluggable driver slot for later rather than guessed at.
+
+---
+
+## RPA Recipes — Record Once, Replay Reliably
+
+Five tools added to `GUI_Operate` turn its existing click/type/scroll/drag primitives into reusable automations for recurring tasks in any desktop app (ERP or otherwise): `start_recipe_recording`, `record_recipe_step`, `save_recipe`, `list_recipes`, `run_recipe`. Recipes are stored as JSON (name, target app, ordered steps) — no new SQLite table needed for this data volume.
+
+```mermaid
+flowchart TD
+    REC1[start_recipe_recording] --> REC2[Agent performs real actions:\nclick / type_text / etc.]
+    REC2 --> REC3[record_recipe_step after each one\nincl. semantic element_description]
+    REC3 --> REC2
+    REC3 --> REC4[save_recipe]
+    REC4 --> STORE[(rpa-recipe-store.ts\nJSON file)]
+
+    RUN1["run_recipe(name, params)"] --> STORE
+    RUN1 --> STEP{Next step}
+    STEP -- click with\nelement_description --> RELOC[Re-locate via gui_locate_element\nvision lookup, not stale x/y]
+    RELOC -- found --> EXEC3[Execute via the SAME\nclick/type_text/etc. handler]
+    RELOC -- not found --> FALLBACK[Fall back to recorded x/y]
+    FALLBACK --> EXEC3
+    STEP -- other tool --> EXEC3
+    EXEC3 --> STEP
+```
+
+The actual reliability problem this solves: a step recorded against literal screen coordinates breaks the moment a window moves or resizes. Replay re-resolves each `click` step semantically via the existing vision-based element locator, using the step's saved description ("the Save button") — falling back to the recorded coordinates only if that fails. Replay reuses the exact same tool handlers as live use, so `GUI_Operate`'s existing safety checks (irreversible-click confirmation, emergency stop, app denylist) apply automatically to recipe steps with no extra code.
+
+---
+
 ## Memory & Tool-Result Reliability Guardrails
 
 Two related, previously-diagnosed failure modes and their fixes:
@@ -330,30 +385,31 @@ erDiagram
 
 ## Technology Stack
 
-| Layer                 | Technology                                                                 |
-| --------------------- | -------------------------------------------------------------------------- |
-| Desktop shell         | Electron 41                                                                |
-| UI framework          | React 18 + Vite 7                                                          |
-| Styling               | Tailwind CSS 3                                                             |
-| State                 | Zustand                                                                    |
-| Local LLM             | Ollama + Gemma 4 (26b / e4b)                                               |
-| Cloud model providers | Gemini, OpenAI (ChatGPT), Anthropic, OpenRouter — API key auth             |
-| Google Workspace auth | Bundled OAuth token broker (Gmail/Drive/Calendar only, not model access)   |
-| IPC                   | Electron contextBridge (preload)                                           |
-| Persistence           | electron-store (encrypted) + SQLite (better-sqlite3, WAL mode)             |
-| MCP                   | @modelcontextprotocol/client + server                                      |
-| Office — Excel        | ExcelJS 4.4 (incl. live formula cells)                                     |
-| Office — Word         | docx 9.7                                                                   |
-| Office — PowerPoint   | PptxGenJS 4.0 (incl. native charts)                                        |
-| Desktop RPA           | GUI_Operate (custom, 19 tools: click/type/drag/scroll/vision/app-tracking) |
-| Browser automation    | chrome-devtools-mcp                                                        |
-| OCR                   | Tesseract (via OCR_Tools MCP server)                                       |
-| Weather               | Open-Meteo (via Weather_Tools MCP server)                                  |
-| Sandbox (macOS)       | Lima VM                                                                    |
-| Sandbox (Windows)     | WSL2                                                                       |
-| Remote                | Slack Bolt SDK (+ other channel adapters) + ngrok + VNC                    |
-| Code signing          | /usr/bin/codesign (ad-hoc, entitlements plist)                             |
-| Language              | TypeScript 5                                                               |
+| Layer                 | Technology                                                                                                |
+| --------------------- | --------------------------------------------------------------------------------------------------------- |
+| Desktop shell         | Electron 41                                                                                               |
+| UI framework          | React 18 + Vite 7                                                                                         |
+| Styling               | Tailwind CSS 3                                                                                            |
+| State                 | Zustand                                                                                                   |
+| Local LLM             | Ollama + Gemma 4 (26b / e4b)                                                                              |
+| Cloud model providers | Gemini, OpenAI (ChatGPT), Anthropic, OpenRouter — API key auth                                            |
+| Google Workspace auth | Bundled OAuth token broker (Gmail/Drive/Calendar only, not model access)                                  |
+| IPC                   | Electron contextBridge (preload)                                                                          |
+| Persistence           | electron-store (encrypted) + SQLite (better-sqlite3, WAL mode)                                            |
+| MCP                   | @modelcontextprotocol/client + server                                                                     |
+| Office — Excel        | ExcelJS 4.4 (incl. live formula cells)                                                                    |
+| Office — Word         | docx 9.7                                                                                                  |
+| Office — PowerPoint   | PptxGenJS 4.0 (incl. native charts)                                                                       |
+| Desktop RPA           | GUI_Operate (custom, 19 tools + 5 recipe tools: click/type/drag/scroll/vision/app-tracking/record-replay) |
+| Browser automation    | chrome-devtools-mcp                                                                                       |
+| OCR                   | Tesseract (via OCR_Tools MCP server)                                                                      |
+| Weather               | Open-Meteo (via Weather_Tools MCP server)                                                                 |
+| Infra diagnostics     | ssh2, net-snmp, pg, mysql2, @netcuras/nodejs-winrm (via Infra_RCA MCP server)                             |
+| Sandbox (macOS)       | Lima VM                                                                                                   |
+| Sandbox (Windows)     | WSL2                                                                                                      |
+| Remote                | Slack Bolt SDK (+ other channel adapters) + ngrok + VNC                                                   |
+| Code signing          | /usr/bin/codesign (ad-hoc, entitlements plist)                                                            |
+| Language              | TypeScript 5                                                                                              |
 
 ---
 
@@ -370,12 +426,23 @@ src/
 │   ├── mcp/            MCP server lifecycle, tool registry
 │   │   ├── mcp-manager.ts          Server lifecycle, tool dispatch,
 │   │   │                           oversized-result truncation
-│   │   ├── gui-operate-server.ts   Desktop/app RPA (19 tools)
+│   │   ├── gui-operate-server.ts   Desktop/app RPA (19 tools) + RPA
+│   │   │                           recipe record/replay (5 tools)
+│   │   ├── rpa-recipe-store.ts     JSON store for recorded recipes
 │   │   ├── office-tools-server.ts  Excel/Word/PPT generation (3 tools,
 │   │   │                           incl. live Excel formulas)
 │   │   ├── google-workspace-server.ts  Gmail/Drive/Calendar
 │   │   ├── ocr-tools-server.ts     Tesseract OCR
-│   │   └── weather-tools-server.ts Open-Meteo weather
+│   │   ├── weather-tools-server.ts Open-Meteo weather
+│   │   ├── infra-rca-server.ts     Remote diagnostics (5 tools);
+│   │   │                           propose/execute-fix split, never
+│   │   │                           auto-executes
+│   │   ├── infra-drivers/          ssh/winrm/snmp/db/onvif diagnostic
+│   │   │                           drivers (onvif is a stub — no named
+│   │   │                           vendor yet)
+│   │   ├── infra-rca-store.ts      Encrypted target credential store
+│   │   └── infra-rca-broker.ts     Loopback broker resolving a target's
+│   │                               secret by name — never via the model
 │   ├── memory/         SQLite-backed memory (short + long term),
 │   │                   untrusted-context + no-fabrication guardrails
 │   ├── remote/         Slack (+ other channels), ngrok tunnel, VNC config
@@ -384,7 +451,8 @@ src/
 │   ├── schedule/       Scheduled + reactive watch-condition agent runs
 │   └── tools/          Tool executor wrappers
 ├── renderer/
-│   ├── components/     All React UI components, incl. ModelSwitcher
+│   ├── components/     All React UI components, incl. ModelSwitcher,
+│   │                   settings/SettingsInfraRCA (target credential CRUD)
 │   ├── store/          Zustand app state
 │   ├── hooks/          Custom React hooks
 │   └── i18n/           English locale (en.json)

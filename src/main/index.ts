@@ -15,6 +15,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, Tray } from 'electron';
 import { join, resolve, dirname, isAbsolute, basename } from 'path';
 import * as fs from 'fs';
+import * as net from 'net';
 import { execFileSync } from 'child_process';
 import { config } from 'dotenv';
 import { initDatabase, closeDatabase } from './db/database';
@@ -71,6 +72,8 @@ import {
   startGoogleTokenBroker,
   stopGoogleTokenBroker,
 } from './google';
+import { startInfraRcaBroker, stopInfraRcaBroker } from './mcp/infra-rca-broker';
+import { infraRcaStore } from './mcp/infra-rca-store';
 import {
   ScheduledTaskManager,
   type ScheduledTaskCreateInput,
@@ -132,6 +135,13 @@ if (configStore.isConfigured()) {
   log('[Config] Applying saved configuration...');
   configStore.applyToEnv();
 }
+
+// electron-builder's `productName` only sets the packaged app's display name
+// (Info.plist / installer) — it has no effect running `electron .` in dev
+// mode, where app.getName() otherwise falls back to package.json's "name"
+// field ("dsr-coworkai"). Set it explicitly so the Dock/menu bar/Cmd-Tab name
+// matches the product name in dev too, not just in a built release.
+app.setName('V-Coworker');
 
 // Disable hardware acceleration for better compatibility
 app.disableHardwareAcceleration();
@@ -364,13 +374,12 @@ function buildMacMenu() {
 function setupTray() {
   if (tray) return;
 
-  // Use .ico on Windows for proper multi-resolution tray support; fall back to .png if absent
-  const iconName =
-    process.platform === 'darwin'
-      ? 'tray-iconTemplate.png'
-      : process.platform === 'win32'
-        ? 'tray-icon.ico'
-        : 'tray-icon.png';
+  // Use .ico on Windows for proper multi-resolution tray support; fall back to .png if absent.
+  // macOS: a filename containing "Template" is auto-rendered by AppKit as a
+  // monochrome, alpha-only mask (for automatic dark/light menu-bar
+  // adaptation) — that discards all color, which is wrong for a branded
+  // color logo. Use the plain colored icon on macOS too, matching Windows/Linux.
+  const iconName = process.platform === 'win32' ? 'tray-icon.ico' : 'tray-icon.png';
   // TODO: create resources/tray-icon.ico from tray-icon.png for full Windows tray fidelity
   const iconPath = app.isPackaged
     ? join(process.resourcesPath, iconName)
@@ -460,6 +469,19 @@ function applyNativeThemePreference(theme: AppTheme): void {
   nativeTheme.themeSource = theme;
 }
 
+/** Resolves the platform-appropriate app icon path, shared by the window's own icon option and app.dock.setIcon(). */
+function getAppIconPath(): string {
+  const windowIconName =
+    process.platform === 'darwin'
+      ? 'icon.icns'
+      : process.platform === 'win32'
+        ? 'icon.ico'
+        : 'icon.png';
+  return app.isPackaged
+    ? join(process.resourcesPath, windowIconName)
+    : join(__dirname, `../../resources/${windowIconName}`);
+}
+
 function createWindow() {
   const savedTheme = getSavedThemePreference();
   applyNativeThemePreference(savedTheme);
@@ -488,12 +510,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     backgroundColor: THEME.background,
-    icon: (() => {
-      const windowIconName = isMac ? 'icon.icns' : isWindows ? 'icon.ico' : 'icon.png';
-      return app.isPackaged
-        ? join(process.resourcesPath, windowIconName)
-        : join(__dirname, `../../resources/${windowIconName}`);
-    })(),
+    icon: getAppIconPath(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
@@ -522,7 +539,7 @@ function createWindow() {
     try {
       allowedOrigins.add(new URL(process.env.VITE_DEV_SERVER_URL).origin);
     } catch {
-      // 忽略无效的开发服务地址
+      // Ignore an invalid dev server URL
     }
   }
   const allowedProtocols = new Set<string>(['file:', 'devtools:']);
@@ -761,7 +778,7 @@ async function startSandboxBootstrap(): Promise<void> {
 // Pluggable event sender — defaults to mainWindow IPC, swapped for JSONL in headless mode
 let eventSender: ((event: ServerEvent) => void) | null = null;
 
-// 发送事件到渲染进程（含远程会话拦截）
+// Send an event to the renderer process (includes remote session interception)
 function sendToRenderer(event: ServerEvent) {
   const payload =
     'payload' in event
@@ -769,25 +786,25 @@ function sendToRenderer(event: ServerEvent) {
       : undefined;
   const sessionId = payload?.sessionId;
 
-  // 判断是否远程会话
+  // Check whether this is a remote session
   if (sessionId && remoteManager.isRemoteSession(sessionId)) {
-    // 处理远程会话事件
+    // Handle remote session events
 
-    // 拦截 stream.message，用于回传到远程通道
+    // Intercept stream.message to relay it back to the remote channel
     if (event.type === 'stream.message') {
       const message = payload.message as {
         role?: string;
         content?: Array<{ type: string; text?: string }>;
       };
       if (message?.role === 'assistant' && message?.content) {
-        // 提取助手文本内容
+        // Extract the assistant's text content
         const textContent = message.content
           .filter((c) => c.type === 'text' && c.text)
           .map((c) => c.text)
           .join('\n');
 
         if (textContent) {
-          // 发送到远程通道（带缓冲）
+          // Send to the remote channel (buffered)
           remoteManager.sendResponseToChannel(sessionId, textContent).catch((err: Error) => {
             logError('[Remote] Failed to send response to channel:', err);
           });
@@ -795,7 +812,7 @@ function sendToRenderer(event: ServerEvent) {
       }
     }
 
-    // 拦截 trace.step 作为工具进度
+    // Intercept trace.step as tool progress
     if (event.type === 'trace.step') {
       const step = payload.step as {
         type?: string;
@@ -820,20 +837,20 @@ function sendToRenderer(event: ServerEvent) {
       }
     }
 
-    // trace.update 预留；当前主要用 trace.step
+    // trace.update is reserved for future use; trace.step is the main one used today
 
-    // 拦截 session.status 用于清理
+    // Intercept session.status for cleanup
     if (event.type === 'session.status') {
       const status = payload.status as string;
       if (status === 'idle' || status === 'error') {
-        // 会话结束，清空缓冲
+        // Session ended, clear the buffer
         remoteManager.clearSessionBuffer(sessionId).catch((err: Error) => {
           logError('[Remote] Failed to clear session buffer:', err);
         });
       }
     }
 
-    // 拦截 permission.request
+    // Intercept permission.request
     if (event.type === 'permission.request' && payload.toolUseId && payload.toolName) {
       log('[Remote] Intercepting permission for remote session:', sessionId);
       remoteManager
@@ -857,11 +874,11 @@ function sendToRenderer(event: ServerEvent) {
         .catch((err) => {
           logError('[Remote] Failed to handle permission request:', err);
         });
-      return; // 不发送到本地 UI
+      return; // Don't send to the local UI
     }
   }
 
-  // 发送到本地 UI（or headless JSONL sender）
+  // Send to the local UI (or headless JSONL sender)
   if (eventSender) {
     eventSender(event);
   } else if (mainWindow && !mainWindow.isDestroyed()) {
@@ -873,6 +890,22 @@ function sendToRenderer(event: ServerEvent) {
 app
   .whenReady()
   .then(async () => {
+    // app.setName() (called above, before app.disableHardwareAcceleration())
+    // does not retroactively change the macOS Dock tile — that's a separate
+    // API. app.dock only exists on macOS. Unlike the BrowserWindow `icon`
+    // option (which accepts .icns fine), app.dock.setIcon() needs a
+    // PNG/JPEG-decodable image — it fails to load .icns directly.
+    if (process.platform === 'darwin' && app.dock) {
+      try {
+        const dockIconPath = app.isPackaged
+          ? join(process.resourcesPath, 'icon.png')
+          : join(__dirname, '../../resources/icon.png');
+        app.dock.setIcon(dockIconPath);
+      } catch (err) {
+        logWarn('[App] Failed to set Dock icon:', err);
+      }
+    }
+
     // Smoke test mode: verify the app can start, then exit cleanly
     if (process.argv.includes('--smoke-test')) {
       log('[SmokeTest] App launched successfully in smoke test mode');
@@ -910,6 +943,15 @@ app
       await startGoogleTokenBroker();
     } catch (error) {
       logError('[Google] Failed to start token broker:', error);
+    }
+
+    // Same reasoning as the Google token broker above — must start before
+    // SessionManager construction so Infra_RCA (a builtin, always-enabled
+    // server) spawns with INFRA_RCA_BROKER_PORT/SECRET already set.
+    try {
+      await startInfraRcaBroker();
+    } catch (error) {
+      logError('[InfraRCA] Failed to start broker:', error);
     }
 
     // ── Headless mode ──────────────────────────────────────────────────
@@ -1335,7 +1377,7 @@ app
     // Initialize default working directory
     initializeDefaultWorkingDir();
     log('Working directory:', currentWorkingDir);
-    // 远程会话默认使用全局工作目录
+    // Remote sessions default to the global working directory
     remoteManager.setDefaultWorkingDirectory(currentWorkingDir || undefined);
 
     // Initialize database
@@ -1452,7 +1494,7 @@ app
         }
         const started = await sessionManager.startSession(title, task.prompt, task.cwd);
         sessionManager.markSessionScheduled(started.id);
-        // 定时任务创建的新会话需要主动同步到前端会话列表
+        // A new session created by a scheduled task needs to be actively synced to the renderer's session list
         sendToRenderer({
           type: 'session.update',
           payload: { sessionId: started.id, updates: started },
@@ -1469,7 +1511,7 @@ app
     });
     scheduledTaskManager.start();
 
-    // 初始化远程管理器
+    // Initialize the remote manager
     remoteManager.setRendererCallback(sendToRenderer);
     const agentExecutor: AgentExecutor = {
       startSession: async (title, prompt, cwd) => {
@@ -1507,7 +1549,7 @@ app
     };
     remoteManager.setAgentExecutor(agentExecutor);
 
-    // 远程控制启用时启动
+    // Start it if remote control is enabled
     if (remoteConfigStore.isEnabled()) {
       remoteManager.start().catch((error) => {
         logError('[App] Failed to start remote control:', error);
@@ -1563,13 +1605,14 @@ async function cleanupSandboxResources(): Promise<void> {
 
   stopNavServer();
   await stopGoogleTokenBroker();
+  await stopInfraRcaBroker();
   stopConfigFileWatcher();
   skillsManager?.stopStorageMonitoring();
   scheduledTaskManager?.stop();
   tray?.destroy();
   tray = null;
 
-  // 停止远程控制
+  // Stop remote control
   try {
     log('[App] Stopping remote control...');
     await withTimeout(remoteManager.stop(), 5000, 'Remote control shutdown');
@@ -1653,6 +1696,7 @@ app.on('before-quit', async (event) => {
     if (process.env.VITE_DEV_SERVER_URL) {
       stopNavServer();
       await stopGoogleTokenBroker();
+      await stopInfraRcaBroker();
       try {
         closeDatabase();
       } catch {
@@ -2313,10 +2357,88 @@ ipcMain.handle('google.connectAccount', async () => {
   return result;
 });
 
-ipcMain.handle('google.disconnectAccount', async () => {
+ipcMain.handle('google.disconnectAudience', async () => {
   const result = await disconnectGoogleAccount();
   await setGoogleWorkspaceServerEnabled(false);
   return result;
+});
+
+// Infra RCA target CRUD — Infra_RCA is always enabled (force-pushed in
+// mcp-config-store.ts's getEnabledServers(), like Office_Tools), so unlike
+// Google Workspace there is no separate enable/disable toggle here. Secrets
+// are written directly to infra-rca-store.ts's encrypted file and never
+// echoed back to the renderer; only listTargets() (name/protocol/host) is.
+ipcMain.handle('infraRca.listTargets', () => {
+  try {
+    return infraRcaStore.listTargets();
+  } catch (error) {
+    logError('[InfraRCA] Error listing targets:', error);
+    return [];
+  }
+});
+
+ipcMain.handle(
+  'infraRca.saveTarget',
+  (_event, target: Parameters<typeof infraRcaStore.saveTarget>[0]) => {
+    try {
+      const saved = infraRcaStore.saveTarget(target);
+      return { success: true, id: saved.id };
+    } catch (error) {
+      logError('[InfraRCA] Error saving target:', error);
+      return { success: false, error: 'Failed to save target.' };
+    }
+  }
+);
+
+ipcMain.handle('infraRca.deleteTarget', (_event, id: string) => {
+  try {
+    infraRcaStore.deleteTarget(id);
+    return { success: true };
+  } catch (error) {
+    logError('[InfraRCA] Error deleting target:', error);
+    return { success: false, error: 'Failed to delete target.' };
+  }
+});
+
+ipcMain.handle('infraRca.testConnection', async (_event, id: string) => {
+  const targets = infraRcaStore.listTargets();
+  const match = targets.find((t) => t.id === id);
+  if (!match) {
+    return { reachable: false, error: 'Target not found.' };
+  }
+  const full = infraRcaStore.getTargetByName(match.name);
+  if (!full) {
+    return { reachable: false, error: 'Target not found.' };
+  }
+  const defaultPort =
+    full.protocol === 'ssh'
+      ? 22
+      : full.protocol === 'winrm'
+        ? 5985
+        : full.protocol === 'db'
+          ? full.dbEngine === 'mysql'
+            ? 3306
+            : 5432
+          : 161;
+  const port = full.port || defaultPort;
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    const start = Date.now();
+    const timer = setTimeout(() => {
+      socket.destroy();
+      resolve({ reachable: false, error: 'Connection timed out.' });
+    }, 5000);
+    socket
+      .connect(port, full.host, () => {
+        clearTimeout(timer);
+        socket.destroy();
+        resolve({ reachable: true, latencyMs: Date.now() - start });
+      })
+      .on('error', (err: Error) => {
+        clearTimeout(timer);
+        resolve({ reachable: false, error: err.message });
+      });
+  });
 });
 
 // Skills API handlers
@@ -2908,7 +3030,7 @@ ipcMain.handle('logs.isEnabled', () => {
 });
 
 // ============================================================================
-// 远程控制 IPC 处理
+// Remote control IPC handlers
 // ============================================================================
 
 ipcMain.handle('remote.getConfig', () => {

@@ -70,6 +70,10 @@ asarUnpack:
   # which cannot read from inside an asar archive — must stay on real disk.
   - node_modules/tesseract.js/**/*
   - node_modules/tesseract.js-core/**/*
+  # ssh2's optional cpu-features dependency ships a native addon; native .node
+  # binaries cannot be loaded from inside an asar archive.
+  - node_modules/ssh2/**/*.node
+  - node_modules/cpu-features/**/*.node
 
 win:
   icon: resources/icon.ico

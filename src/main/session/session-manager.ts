@@ -740,7 +740,8 @@ export class SessionManager {
             );
         }
 
-        // 标题生成不再与首轮对话并发，避免与主请求竞争同一上游配额/通道导致体感变慢。
+        // Title generation no longer runs concurrently with the first turn, avoiding contention with
+        // the main request over the same upstream quota/channel that would otherwise make it feel slower.
         this.runSessionTitleGeneration(session, prompt, existingMessages).catch((err) =>
           logCtxError('[SessionManager] Title generation failed:', err)
         );

@@ -15,7 +15,9 @@ Built on top of the Electron + React stack, V-Coworker gives you:
 
 - **Autonomous Mode** — opt-in auto-approval of tool calls so scheduled/unattended tasks don't stall waiting for a click, without ever overriding explicit deny rules or irreversible-action confirmations
 - In-chat model switcher — change provider/model (Ollama, Gemini, OpenAI, Anthropic, OpenRouter) without leaving the conversation
-- One-click MCP (Model Context Protocol) tool integration, plus five bundled first-party MCP servers (see below)
+- One-click MCP (Model Context Protocol) tool integration, plus six bundled first-party MCP servers (see below)
+- RPA recipes — record a sequence of desktop actions once, replay it reliably against any app/ERP for recurring daily tasks
+- Remote infrastructure RCA — diagnose Linux/Windows servers, network gear, printers, UPS, and databases over SSH/WinRM/SNMP/DB, with any proposed fix always requiring your explicit approval before it runs
 - Skill protocols — reusable AI workflows
 - Sandbox isolation (Lima on macOS, WSL on Windows)
 - Persistent memory across sessions, with guardrails against treating past failures as a reason to skip the current attempt
@@ -27,27 +29,29 @@ Built on top of the Electron + React stack, V-Coworker gives you:
 
 ## Features
 
-| Feature                  | Details                                                                                                                                         |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Local LLM**            | Ollama + Gemma 4 (26b / e4b) — runs 100% on your machine                                                                                        |
-| **Multi-provider**       | Switch between Ollama, Gemini, OpenAI (ChatGPT), Anthropic, and OpenRouter from the chat window                                                 |
-| **Autonomous Mode**      | Auto-approve tool calls that would otherwise wait on a permission dialog — for unattended/scheduled work                                        |
-| **MCP Tools**            | 1-click install of Model Context Protocol servers, plus 5 bundled first-party servers                                                           |
-| **Browser Automation**   | Full page navigation, click, type, snapshot via the Chrome MCP server                                                                           |
-| **Desktop / App RPA**    | Click, type, drag, scroll, screenshot, vision-based element location, app tracking, and an emergency-stop safety switch via GUI_Operate         |
-| **Office Documents**     | Create Excel (.xlsx, with live formulas — NPV/IRR/STDEV/growth-rate), Word (.docx), and PowerPoint (.pptx, with native charts) via Office_Tools |
-| **Project Roadmaps/WBS** | Source-driven WBS/roadmap generation from an existing workbook (Excel and PPTX output)                                                          |
-| **Google Workspace**     | Gmail, Drive, and Calendar access with bundled OAuth                                                                                            |
-| **OCR**                  | Text extraction from images via Tesseract                                                                                                       |
-| **Weather**              | Live weather data via Open-Meteo                                                                                                                |
-| **Skills**               | Reusable agent skill protocols stored locally                                                                                                   |
-| **Sandbox**              | Lima (macOS) / WSL (Windows) process isolation                                                                                                  |
-| **Memory**               | Long-term and short-term persistent memory, with untrusted-context and no-fabrication guardrails                                                |
-| **Scheduled Tasks**      | Daily/recurring and reactive watch-condition tasks; unattended runs fail fast instead of stalling on a permission dialog                        |
-| **Remote**               | Control sessions remotely via Slack or other channels, plus VNC-based remote desktop                                                            |
-| **Multi-session**        | Parallel agent sessions with context tracking                                                                                                   |
-| **Themes**               | Dark / Light / System                                                                                                                           |
-| **macOS Signing**        | Auto ad-hoc code signing of native addons on install (macOS 26 Tahoe compatible)                                                                |
+| Feature                  | Details                                                                                                                                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Local LLM**            | Ollama + Gemma 4 (26b / e4b) — runs 100% on your machine                                                                                                                                   |
+| **Multi-provider**       | Switch between Ollama, Gemini, OpenAI (ChatGPT), Anthropic, and OpenRouter from the chat window                                                                                            |
+| **Autonomous Mode**      | Auto-approve tool calls that would otherwise wait on a permission dialog — for unattended/scheduled work                                                                                   |
+| **MCP Tools**            | 1-click install of Model Context Protocol servers, plus 6 bundled first-party servers                                                                                                      |
+| **Browser Automation**   | Full page navigation, click, type, snapshot via the Chrome MCP server                                                                                                                      |
+| **Desktop / App RPA**    | Click, type, drag, scroll, screenshot, vision-based element location, app tracking, and an emergency-stop safety switch via GUI_Operate                                                    |
+| **RPA Recipes**          | Record a sequence of desktop actions once, replay it reliably against any app/ERP for recurring daily tasks — replay re-locates targets semantically instead of trusting stale coordinates |
+| **Infra RCA**            | Remote diagnostics for Linux/Windows servers, network gear, printers, UPS, and databases (SSH/WinRM/SNMP/DB) — proposes fixes but never auto-executes one without your explicit approval   |
+| **Office Documents**     | Create Excel (.xlsx, with live formulas — NPV/IRR/STDEV/growth-rate), Word (.docx), and PowerPoint (.pptx, with native charts) via Office_Tools                                            |
+| **Project Roadmaps/WBS** | Source-driven WBS/roadmap generation from an existing workbook (Excel and PPTX output)                                                                                                     |
+| **Google Workspace**     | Gmail, Drive, and Calendar access with bundled OAuth                                                                                                                                       |
+| **OCR**                  | Text extraction from images via Tesseract                                                                                                                                                  |
+| **Weather**              | Live weather data via Open-Meteo                                                                                                                                                           |
+| **Skills**               | Reusable agent skill protocols stored locally                                                                                                                                              |
+| **Sandbox**              | Lima (macOS) / WSL (Windows) process isolation                                                                                                                                             |
+| **Memory**               | Long-term and short-term persistent memory, with untrusted-context and no-fabrication guardrails                                                                                           |
+| **Scheduled Tasks**      | Daily/recurring and reactive watch-condition tasks; unattended runs fail fast instead of stalling on a permission dialog                                                                   |
+| **Remote**               | Control sessions remotely via Slack or other channels, plus VNC-based remote desktop                                                                                                       |
+| **Multi-session**        | Parallel agent sessions with context tracking                                                                                                                                              |
+| **Themes**               | Dark / Light / System                                                                                                                                                                      |
+| **macOS Signing**        | Auto ad-hoc code signing of native addons on install (macOS 26 Tahoe compatible)                                                                                                           |
 
 ---
 
@@ -125,7 +129,7 @@ dsr-CoworkAI/
 │   │   ├── agent/     # Agent runner, permission hook, session loop
 │   │   ├── config/    # Config store + Ollama/Gemini/OpenAI/Anthropic auth
 │   │   ├── mcp/       # MCP manager + bundled servers (gui-operate, office-tools,
-│   │   │              #   google-workspace, ocr-tools, weather-tools)
+│   │   │              #   google-workspace, ocr-tools, weather-tools, infra-rca)
 │   │   ├── remote/    # Slack (and other channel) + VNC remote control
 │   │   ├── sandbox/   # Lima / WSL isolation
 │   │   ├── skills/    # Skill protocol registry
@@ -165,13 +169,14 @@ Files are saved to your Desktop (or `WORKSPACE_DIR` env var) by default.
 
 ## Other Bundled MCP Servers
 
-| Server               | Capability                                                                                                                         |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| **Chrome**           | Full browser automation — navigate, click, type, snapshot, form-fill                                                               |
-| **GUI_Operate**      | Desktop/app RPA — click, type, drag, scroll, screenshot, vision-based element location, app-launch tracking, emergency stop/resume |
-| **Google_Workspace** | Gmail, Drive, and Calendar, with bundled OAuth (no manual credential setup)                                                        |
-| **OCR_Tools**        | Text extraction from images via Tesseract                                                                                          |
-| **Weather_Tools**    | Live weather data via Open-Meteo                                                                                                   |
+| Server               | Capability                                                                                                                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chrome**           | Full browser automation — navigate, click, type, snapshot, form-fill                                                                                                                            |
+| **GUI_Operate**      | Desktop/app RPA — click, type, drag, scroll, screenshot, vision-based element location, app-launch tracking, emergency stop/resume, plus record/replay recipes for recurring tasks              |
+| **Google_Workspace** | Gmail, Drive, and Calendar, with bundled OAuth (no manual credential setup)                                                                                                                     |
+| **OCR_Tools**        | Text extraction from images via Tesseract                                                                                                                                                       |
+| **Weather_Tools**    | Live weather data via Open-Meteo                                                                                                                                                                |
+| **Infra_RCA**        | Remote diagnostics over SSH/WinRM/SNMP/DB — diagnoses OS/disk/RAM/network/DB/printer/power health and proposes a fix, but never executes one without your explicit approval in the conversation |
 
 Additional servers (Notion, Software_Development, or any custom MCP server) can be added from **Settings -> MCP Servers**.
 

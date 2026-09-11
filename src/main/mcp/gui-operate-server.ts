@@ -33,6 +33,13 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
+import {
+  listRecipes,
+  getRecipeByName,
+  saveRecipe,
+  fillParams,
+  type RpaStep,
+} from './rpa-recipe-store';
 writeMCPLog('Imported Node.js built-in modules', 'Bootstrap');
 
 const execFileAsync = promisify(execFile);
@@ -123,6 +130,19 @@ let lastClickEntry: ClickHistoryEntry | null = null; // Track the most recent cl
 // exec timeout (default 30s) — this flag stops the *next* action from firing,
 // which is what matters for an agent mid-chain of clicks.
 let emergencyStopActive = false;
+
+// ─── RPA recipes: record-once, replay-reliably ────────────────────────────
+// In-memory recording buffer for start_recipe_recording/record_recipe_step/
+// save_recipe. Module-scoped (one server process = one recording at a time,
+// matching emergencyStopActive's own scoping above) — not persisted until
+// save_recipe is called.
+interface InProgressRecording {
+  name: string;
+  appName: string;
+  description?: string;
+  steps: RpaStep[];
+}
+let currentRecording: InProgressRecording | null = null;
 
 const IRREVERSIBLE_INTENT_PATTERN =
   /\b(send|submit|delete|remove|purchase|buy|pay|checkout|confirm|sign|approve|publish|post|share|delete\s*account|unsubscribe)\b/i;
@@ -920,9 +940,9 @@ async function resolveCliclickPath(): Promise<string | null> {
     return envOverride;
   }
 
-  // 2) 内置随应用打包（推荐）
-  // 打包布局：Resources/tools/darwin-{arch}/bin/cliclick
-  // 旧版布局：Resources/tools/bin/cliclick
+  // 2) Bundled with the app (recommended)
+  // Packaged layout: Resources/tools/darwin-{arch}/bin/cliclick
+  // Legacy layout: Resources/tools/bin/cliclick
   const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
   const archBundled = await resolveBundledExecutable(
     path.join('tools', `darwin-${arch}`, 'bin', 'cliclick')
@@ -1826,10 +1846,10 @@ async function executeCliclick(command: string): Promise<{ stdout: string; stder
     // Treat this as a hard failure to avoid reporting false-positive click success.
     if (/Accessibility privileges not enabled/i.test(result.stderr || '')) {
       const hint =
-        '\n\nmacOS 权限提示 / Permissions:\n' +
-        '- System Settings → Privacy & Security → Accessibility：允许 Open Cowork\n' +
-        '- 如果是终端运行：允许 Terminal/iTerm\n' +
-        '- 授权后请重启 Open Cowork 再重试\n';
+        '\n\nmacOS Permissions:\n' +
+        '- System Settings → Privacy & Security → Accessibility: allow Open Cowork\n' +
+        '- If running from a terminal: allow Terminal/iTerm\n' +
+        '- After granting access, restart Open Cowork and try again\n';
       throw new Error(
         `cliclick cannot control UI because Accessibility permission is not enabled.${hint}`
       );
@@ -1839,9 +1859,9 @@ async function executeCliclick(command: string): Promise<{ stdout: string; stder
   } catch (error: unknown) {
     const baseMessage = error instanceof Error ? error.message : String(error);
     const hint =
-      '\n\nmacOS 权限提示 / Permissions:\n' +
-      '- System Settings → Privacy & Security → Accessibility：允许 Open Cowork\n' +
-      '- System Settings → Privacy & Security → Automation：允许 Open Cowork 控制 “System Events”\n';
+      '\n\nmacOS Permissions:\n' +
+      '- System Settings → Privacy & Security → Accessibility: allow Open Cowork\n' +
+      '- System Settings → Privacy & Security → Automation: allow Open Cowork to control "System Events"\n';
     throw new Error(`${baseMessage}${hint}`);
   }
 }
@@ -3356,7 +3376,7 @@ async function performClick(
   const cliclickPath = await resolveCliclickPath();
 
   if (!cliclickPath) {
-    // 无 cliclick 时，使用 Quartz 事件作为降级方案
+    // When cliclick is unavailable, fall back to Quartz events
     await performMacClickViaQuartz(globalX, globalY, clickType, normalizedModifiers);
     await addClickToHistory(localX, localY, displayIndex, clickType);
     return `Performed ${clickType} click at (${localX}, ${localY}) on display ${displayIndex} (global: ${globalX}, ${globalY})`;
@@ -3932,9 +3952,9 @@ async function takeScreenshot(
   } catch (error: unknown) {
     const baseMessage = error instanceof Error ? error.message : String(error);
     const hint =
-      '\n\nmacOS 权限提示 / Permissions:\n' +
-      '- System Settings → Privacy & Security → Screen Recording：允许 Open Cowork\n' +
-      '- 重新启动应用后再试 / Restart the app and try again\n';
+      '\n\nmacOS Permissions:\n' +
+      '- System Settings → Privacy & Security → Screen Recording: allow Open Cowork\n' +
+      '- Restart the app and try again\n';
     throw new Error(`${baseMessage}${hint}`);
   }
 
@@ -5088,13 +5108,13 @@ async function analyzeScreenshotWithVision(
     // Get image dimensions
     const imageDims = await getImageDimensions(annotatedPath);
 
-    const prompt = `给我${elementDescription}的grounding坐标。
+    const prompt = `Give me the grounding coordinates for ${elementDescription}.
 
-**注意**：图片上可能有黄色圆圈标记，这些是之前点击过的位置（仅用于相对位置参考，它们并不一定是正确的点击位置），标记格式为"#序号"和已经归一化之后的"[y,x]"坐标。这些标记不是界面的一部分，请忽略它们，只定位实际的界面元素。
+**Note**: The image may contain yellow circle markers, which indicate previously clicked positions (for relative reference only — they are not necessarily correct click positions). Markers are labeled with "#index" and an already-normalized "[y,x]" coordinate. These markers are not part of the UI — ignore them and locate only the actual UI element.
 
-坐标格式：归一化到0-1000，格式为[ymin, xmin, ymax, xmax]
+Coordinate format: normalized to 0-1000, as [ymin, xmin, ymax, xmax]
 
-返回JSON（不要markdown）:
+Return JSON (no markdown):
 {"box_2d": [ymin, xmin, ymax, xmax], "confidence": <0-100>}`;
 
     writeMCPLog(`[analyzeScreenshotWithVision] Prompt: ${prompt}`);
@@ -6631,12 +6651,94 @@ function createMcpServer(): Server {
             required: [],
           },
         },
+        {
+          name: 'start_recipe_recording',
+          description:
+            'Begin recording a reusable RPA recipe. After calling this, perform the real actions (click/type_text/etc.) for the task, calling record_recipe_step after each one, then call save_recipe when done. Use this when the user wants a repeatable daily/recurring task in an app (any ERP or software).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              recipe_name: { type: 'string', description: 'A short, unique name for this recipe.' },
+              app_name: {
+                type: 'string',
+                description: 'The application this recipe drives (matches init_app naming).',
+              },
+            },
+            required: ['recipe_name', 'app_name'],
+          },
+        },
+        {
+          name: 'record_recipe_step',
+          description:
+            'Append the action you just performed to the in-progress recipe recording. Call this immediately after each click/type_text/key_press/scroll/drag/wait during recording, restating the exact tool and arguments you used, plus a short semantic description of the target element (e.g. "the Save button") — this description is what makes replay reliable even if the window later moves or resizes.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              tool: {
+                type: 'string',
+                enum: ['click', 'type_text', 'key_press', 'scroll', 'drag', 'wait'],
+              },
+              args: {
+                type: 'object',
+                description: 'The exact arguments you just passed to that tool.',
+              },
+              element_description: {
+                type: 'string',
+                description: 'Semantic description of the target, e.g. "the Save button".',
+              },
+            },
+            required: ['tool', 'args'],
+          },
+        },
+        {
+          name: 'save_recipe',
+          description:
+            'Finalize and persist the current recipe recording. Ends the recording session.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              description: {
+                type: 'string',
+                description: 'Optional human-readable summary of what this recipe does.',
+              },
+            },
+            required: [],
+          },
+        },
+        {
+          name: 'list_recipes',
+          description: 'List saved RPA recipes (name, app, description).',
+          inputSchema: { type: 'object', properties: {}, required: [] },
+        },
+        {
+          name: 'run_recipe',
+          description:
+            'Replay a saved recipe step by step, reusing the same click/type_text/etc. tools. Each step re-locates its target semantically (via its recorded element_description) rather than trusting stale coordinates, so replay stays reliable even if the window moved. Use params to fill {{placeholder}} tokens in recorded step arguments (e.g. a date or invoice number) for daily variation.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              recipe_name: { type: 'string' },
+              params: {
+                type: 'object',
+                description:
+                  'Optional key-value map to substitute {{key}} placeholders in recorded step arguments.',
+              },
+            },
+            required: ['recipe_name'],
+          },
+        },
       ],
     };
   });
 
-  // Handle tool calls
-  server.setRequestHandler('tools/call', async (request): Promise<CallToolResult> => {
+  // Handle tool calls. Named (not an inline arrow passed to setRequestHandler)
+  // so run_recipe below can call it recursively for each recorded step,
+  // reusing the exact same click/type_text/etc. handlers — including their
+  // safety checks (confirm_irreversible, emergencyStopActive, app denylist)
+  // — instead of duplicating execution logic.
+  async function handleToolCall(request: {
+    params: { name: string; arguments?: Record<string, unknown> };
+  }): Promise<CallToolResult> {
     const { name, arguments: args } = request.params;
 
     try {
@@ -7009,6 +7111,122 @@ function createMcpServer(): Server {
           break;
         }
 
+        case 'start_recipe_recording': {
+          const { recipe_name, app_name } = args as { recipe_name: string; app_name: string };
+          currentRecording = { name: recipe_name, appName: app_name, steps: [] };
+          result = JSON.stringify({
+            success: true,
+            message: `Recording started for recipe "${recipe_name}". Perform the actions, calling record_recipe_step after each one, then save_recipe when done.`,
+          });
+          break;
+        }
+
+        case 'record_recipe_step': {
+          if (!currentRecording) {
+            throw new Error('No recipe recording in progress. Call start_recipe_recording first.');
+          }
+          const {
+            tool,
+            args: stepArgs,
+            element_description,
+          } = args as {
+            tool: RpaStep['tool'];
+            args: Record<string, unknown>;
+            element_description?: string;
+          };
+          currentRecording.steps.push({
+            tool,
+            args: stepArgs,
+            elementDescription: element_description,
+          });
+          result = JSON.stringify({
+            success: true,
+            message: `Step ${currentRecording.steps.length} recorded.`,
+          });
+          break;
+        }
+
+        case 'save_recipe': {
+          if (!currentRecording) {
+            throw new Error('No recipe recording in progress. Call start_recipe_recording first.');
+          }
+          const { description } = args as { description?: string };
+          const saved = await saveRecipe({
+            name: currentRecording.name,
+            appName: currentRecording.appName,
+            description,
+            steps: currentRecording.steps,
+          });
+          currentRecording = null;
+          result = JSON.stringify({
+            success: true,
+            message: `Recipe "${saved.name}" saved with ${saved.steps.length} step(s).`,
+          });
+          break;
+        }
+
+        case 'list_recipes': {
+          const recipes = await listRecipes();
+          result = JSON.stringify(recipes, null, 2);
+          break;
+        }
+
+        case 'run_recipe': {
+          const { recipe_name, params } = args as {
+            recipe_name: string;
+            params?: Record<string, string>;
+          };
+          const recipe = await getRecipeByName(recipe_name);
+          if (!recipe) {
+            throw new Error(
+              `No recipe named "${recipe_name}". Call list_recipes to see what's available.`
+            );
+          }
+          const stepResults: string[] = [];
+          for (let i = 0; i < recipe.steps.length; i++) {
+            const step = recipe.steps[i];
+            let stepArgs = fillParams(step.args, params);
+
+            // Re-resolve click targets semantically instead of trusting stale
+            // recorded coordinates — the actual reliability fix for
+            // "record once, replay reliably" (window may have moved/resized).
+            if (step.tool === 'click' && step.elementDescription) {
+              try {
+                const located = await locateGUIElement(
+                  step.elementDescription,
+                  typeof stepArgs.display_index === 'number' ? stepArgs.display_index : undefined
+                );
+                stepArgs = { ...stepArgs, x: located.x, y: located.y };
+              } catch (locateError: unknown) {
+                writeMCPLog(
+                  `[run_recipe] Semantic relocation failed for step ${i + 1} ("${step.elementDescription}"), falling back to recorded coordinates: ${locateError instanceof Error ? locateError.message : String(locateError)}`,
+                  'Recipe Replay Warning'
+                );
+              }
+            }
+
+            const stepResult = await handleToolCall({
+              params: { name: step.tool, arguments: stepArgs },
+            });
+            const stepText = stepResult.content
+              .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+              .map((c) => c.text)
+              .join(' ');
+            stepResults.push(`Step ${i + 1} (${step.tool}): ${stepText}`);
+            if (stepResult.isError) {
+              throw new Error(
+                `Recipe "${recipe_name}" failed at step ${i + 1} (${step.tool}): ${stepText}`
+              );
+            }
+          }
+          result = JSON.stringify(
+            { success: true, recipe: recipe_name, steps: stepResults },
+            null,
+            2
+          );
+          break;
+        }
+
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
@@ -7039,7 +7257,9 @@ function createMcpServer(): Server {
         isError: true,
       };
     }
-  });
+  }
+
+  server.setRequestHandler('tools/call', handleToolCall);
 
   return server;
 }
