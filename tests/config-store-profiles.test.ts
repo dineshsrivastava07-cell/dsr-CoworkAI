@@ -250,7 +250,7 @@ describe('ConfigStore provider profiles', () => {
     expect(store.isConfigured()).toBe(true);
   });
 
-  it('does not treat ollama as configured when model is still empty', () => {
+  it('falls back to the default ollama model and stays configured when model is left empty', () => {
     const store = new ConfigStore();
 
     store.update({
@@ -260,9 +260,9 @@ describe('ConfigStore provider profiles', () => {
       model: '',
     });
 
-    expect(store.hasUsableCredentialsForActiveSet()).toBe(false);
-    expect(store.hasAnyUsableCredentials()).toBe(false);
-    expect(store.isConfigured()).toBe(false);
+    expect(store.hasUsableCredentialsForActiveSet()).toBe(true);
+    expect(store.hasAnyUsableCredentials()).toBe(true);
+    expect(store.isConfigured()).toBe(true);
   });
 
   it('keeps non-loopback custom anthropic gateway requiring api key', () => {

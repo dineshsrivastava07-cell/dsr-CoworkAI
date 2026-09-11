@@ -393,7 +393,8 @@ describe('MemoryService', () => {
     });
 
     const overview = service.getOverview('/repo/a');
-    expect(overview.coreCount).toBe(2);
+    // 8 built-in DEFAULT_CORE_MEMORY_SEED "skills.*" entries + the 2 real upserts below
+    expect(overview.coreCount).toBe(10);
     expect(overview.experienceSessionCount).toBe(1);
     expect(overview.experienceChunkCount).toBe(1);
 
