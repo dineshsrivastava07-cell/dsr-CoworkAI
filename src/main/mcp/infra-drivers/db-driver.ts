@@ -140,6 +140,65 @@ export async function diagnoseDb(
   };
 }
 
+/**
+ * Rejects anything but a single read-only statement. Deliberately simple (not a
+ * full SQL parser) — good enough to stop the obvious cases (writes, DDL,
+ * statement-stacking) for a tool that's auto-allowed without human confirmation;
+ * anything that actually mutates data still has to go through the gated
+ * infra_propose_fix / infra_execute_fix flow.
+ */
+export function assertReadOnlySelect(sql: string): void {
+  const trimmed = sql.trim().replace(/;\s*$/, '');
+  if (trimmed.includes(';')) {
+    throw new Error('infra_query_db only accepts a single statement — remove the extra ";".');
+  }
+  if (!/^\s*(select|with|show|explain|describe|desc)\b/i.test(trimmed)) {
+    throw new Error(
+      'infra_query_db only accepts read-only statements (SELECT/WITH/SHOW/EXPLAIN/DESCRIBE). Use infra_propose_fix + infra_execute_fix for anything that writes data.'
+    );
+  }
+}
+
+/** Runs a read-only SQL query for ad-hoc auditing/lookups. Auto-allowed — see assertReadOnlySelect. */
+export async function dbQuery(target: TargetCredentials, sql: string): Promise<string> {
+  assertReadOnlySelect(sql);
+  if (target.dbEngine === 'mysql') {
+    const conn = await mysql.createConnection({
+      host: target.host,
+      port: target.port || 3306,
+      user: target.username,
+      password: target.secret,
+      database: target.dbName,
+      connectTimeout: 8000,
+    });
+    try {
+      const [rows] = await conn.query(sql);
+      return JSON.stringify(rows).slice(0, 2000);
+    } finally {
+      await conn.end();
+    }
+  }
+
+  const client = new PgClient({
+    host: target.host,
+    port: target.port || 5432,
+    user: target.username,
+    password: target.secret,
+    database: target.dbName || 'postgres',
+    connectionTimeoutMillis: 8000,
+  });
+  await client.connect();
+  try {
+    const result = await client.query(sql);
+    return JSON.stringify({ rowCount: result.rowCount, rows: result.rows.slice(0, 20) }).slice(
+      0,
+      2000
+    );
+  } finally {
+    await client.end();
+  }
+}
+
 /** Runs an exact, already-proposed SQL remediation statement. Used only by infra_execute_fix. */
 export async function dbExecuteFix(target: TargetCredentials, sql: string): Promise<string> {
   if (target.dbEngine === 'mysql') {

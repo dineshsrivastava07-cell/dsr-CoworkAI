@@ -64,4 +64,26 @@ describe('infra-rca-server safety properties', () => {
   it('documents that Autonomous Mode cannot bypass this refusal', () => {
     expect(source.toLowerCase()).toContain('autonomous mode');
   });
+
+  it('auto re-diagnoses after executing a fix when the proposal carries a category', () => {
+    const executeCaseMatch = source.match(
+      /case 'infra_execute_fix': \{([\s\S]*?)\n {8}\}\n\n {8}default:/
+    );
+    expect(executeCaseMatch).not.toBeNull();
+    const executeBody = executeCaseMatch![1];
+    expect(executeBody).toContain('if (proposal.category) {');
+    expect(executeBody).toContain('diagnose(target, proposal.category)');
+    expect(executeBody).toContain('Post-fix verification');
+    // category is optional — behavior for proposals without one is unchanged.
+    expect(source).toContain('category?: DiagnosticCategory;');
+  });
+
+  it('only allows read-only queries through infra_query_db, never through the propose/execute path', () => {
+    expect(source).toContain(
+      "import { diagnoseDb, dbExecuteFix, dbQuery } from './infra-drivers/db-driver';"
+    );
+    const queryCaseMatch = source.match(/case 'infra_query_db': \{([\s\S]*?)\n {8}\}\n\n {8}case/);
+    expect(queryCaseMatch).not.toBeNull();
+    expect(queryCaseMatch![1]).toContain('await dbQuery(target, sql)');
+  });
 });

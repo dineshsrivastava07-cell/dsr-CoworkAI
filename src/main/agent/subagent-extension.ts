@@ -39,21 +39,50 @@ class ParentCancelledError extends Error {
   }
 }
 
+type SubagentRole =
+  | 'rpa_desktop'
+  | 'it_ops_infra'
+  | 'strategic_pm'
+  | 'data_financial'
+  | 'corporate_comms'
+  | 'web_navigator';
+
 interface SubagentParams {
   task: string;
   result_format?: string;
   allowed_tools?: string[];
   timeout_seconds?: number;
+  role?: SubagentRole;
 }
 
-function buildChildSystemPrompt(task: string, resultFormat?: string): string {
+const ROLE_PROMPTS: Record<SubagentRole, string> = {
+  rpa_desktop:
+    'You specialize in desktop/RPA automation via the GUI_Operate tools — click, type, drag, scroll, and vision-based element location. Verify every action against its own verification/changeDetected result before moving on.',
+  it_ops_infra:
+    'You specialize in remote infrastructure diagnostics via the Infra_RCA tools — diagnose thoroughly with infra_diagnose, use infra_query_db for read-only lookups, always propose a fix with infra_propose_fix and get approval before executing, and rely on the automatic post-fix verification when executing.',
+  strategic_pm:
+    'You specialize in project planning via Office_Tools — build WBS/roadmap/Gantt structures with clear phases, owners, dependencies, and realistic time estimates.',
+  data_financial:
+    "You specialize in quantitative and financial analysis via Office_Tools' Excel generation — use real formulas (NPV, IRR, growth rates, statistics), not hardcoded computed values.",
+  corporate_comms:
+    "You specialize in executive-ready communications via Office_Tools' Word/PowerPoint generation — professional tone, concise structure, real content only, no placeholder text.",
+  web_navigator:
+    'You specialize in browser automation via the Chrome tools — navigate, extract, and return clean structured data (JSON/CSV) rather than free-form prose when the task calls for it.',
+};
+
+export function buildChildSystemPrompt(
+  task: string,
+  resultFormat?: string,
+  role?: SubagentRole
+): string {
   const parts = [
     'You are a focused sub-agent. Complete the task below and return ONLY the result.',
     'Do not ask questions. Do not provide commentary beyond what is needed for the result.',
-    '',
-    `## Task`,
-    task,
   ];
+  if (role && ROLE_PROMPTS[role]) {
+    parts.push('', ROLE_PROMPTS[role]);
+  }
+  parts.push('', `## Task`, task);
   if (resultFormat) {
     parts.push('', `## Expected Output Format`, resultFormat);
   }
@@ -124,9 +153,28 @@ function createSpawnSubagentTool(
           maximum: 300,
         })
       ),
+      role: Type.Optional(
+        Type.Union(
+          [
+            Type.Literal('rpa_desktop'),
+            Type.Literal('it_ops_infra'),
+            Type.Literal('strategic_pm'),
+            Type.Literal('data_financial'),
+            Type.Literal('corporate_comms'),
+            Type.Literal('web_navigator'),
+          ],
+          {
+            description:
+              'Optional domain persona for the child: rpa_desktop (GUI/desktop automation), ' +
+              'it_ops_infra (infrastructure diagnostics/fixes), strategic_pm (roadmap/WBS planning), ' +
+              'data_financial (Excel/financial analysis), corporate_comms (Word/PowerPoint), or ' +
+              'web_navigator (browser automation). If omitted, the child gets a generic prompt.',
+          }
+        )
+      ),
     }),
     async execute(_toolCallId: string, params: unknown) {
-      const { task, result_format, allowed_tools, timeout_seconds } = (params ||
+      const { task, result_format, allowed_tools, timeout_seconds, role } = (params ||
         {}) as SubagentParams;
 
       if (!task || typeof task !== 'string' || task.trim().length === 0) {
@@ -242,7 +290,7 @@ function createSpawnSubagentTool(
         const cwd = config.defaultWorkdir || process.cwd();
         const codingTools = createCodingTools(cwd);
 
-        const childSystemPrompt = buildChildSystemPrompt(task, result_format);
+        const childSystemPrompt = buildChildSystemPrompt(task, result_format, role);
         const resourceLoader = new DefaultResourceLoader({
           cwd,
           appendSystemPrompt: childSystemPrompt,

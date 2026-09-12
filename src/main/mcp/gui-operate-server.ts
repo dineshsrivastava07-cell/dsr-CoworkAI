@@ -6219,7 +6219,7 @@ function createMcpServer(): Server {
         {
           name: 'click',
           description:
-            'Perform a mouse click at specified coordinates. Supports single click, double click, right click, and triple click. Coordinates are display-local logical coordinates by default. You can also pass normalized coordinates (0-1000) via coordinate_type.',
+            'Perform a mouse click at specified coordinates. Supports single click, double click, right click, and triple click. Coordinates are display-local logical coordinates by default. You can also pass normalized coordinates (0-1000) via coordinate_type. If a click on a config/data target keeps failing, prefer an Infra_RCA SSH/WinRM or terminal command instead of retrying.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -6270,7 +6270,7 @@ function createMcpServer(): Server {
         {
           name: 'type_text',
           description:
-            'Type text at the current cursor/focus position. Supports Unicode (Chinese/Japanese/emoji) by automatically using clipboard paste (Cmd+V) when needed.',
+            'Type text at the current cursor/focus position. Supports Unicode (Chinese/Japanese/emoji) by automatically using clipboard paste (Cmd+V) when needed. If typing into a target UI keeps failing when the real goal is a config/file/data change rather than a genuine GUI-only interaction, prefer an Infra_RCA SSH/WinRM command or a terminal command instead.',
           inputSchema: {
             type: 'object',
             properties: {

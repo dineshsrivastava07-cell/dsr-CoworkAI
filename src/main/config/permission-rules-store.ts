@@ -34,6 +34,10 @@ const DEFAULT_RULES: PermissionRule[] = [
   { tool: 'mcp__Infra_RCA__infra_diagnose', action: 'allow' },
   { tool: 'mcp__Infra_RCA__infra_propose_fix', action: 'allow' },
   { tool: 'mcp__Infra_RCA__infra_ping_check', action: 'allow' },
+  // Read-only by construction (assertReadOnlySelect in db-driver.ts rejects
+  // anything but SELECT/WITH/SHOW/EXPLAIN/DESCRIBE) — writes still require the
+  // gated infra_propose_fix/infra_execute_fix flow above.
+  { tool: 'mcp__Infra_RCA__infra_query_db', action: 'allow' },
 ];
 
 const VALID_ACTIONS: ReadonlySet<PermissionRule['action']> = new Set(['allow', 'deny', 'ask']);

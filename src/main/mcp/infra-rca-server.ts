@@ -27,7 +27,7 @@ import type { DiagnosticCategory, TargetCredentials } from './infra-drivers/type
 import { diagnoseSsh, sshExec } from './infra-drivers/ssh-driver';
 import { diagnoseWinrm, winrmExec } from './infra-drivers/winrm-driver';
 import { diagnoseSnmp } from './infra-drivers/snmp-driver';
-import { diagnoseDb, dbExecuteFix } from './infra-drivers/db-driver';
+import { diagnoseDb, dbExecuteFix, dbQuery } from './infra-drivers/db-driver';
 import { diagnoseOnvif } from './infra-drivers/onvif-driver';
 
 const BROKER_PORT = process.env.INFRA_RCA_BROKER_PORT;
@@ -131,6 +131,7 @@ interface PendingProposal {
   explanation: string;
   riskLevel: 'low' | 'medium' | 'high';
   createdAt: number;
+  category?: DiagnosticCategory;
 }
 const PROPOSAL_TTL_MS = 15 * 60 * 1000;
 const pendingProposals = new Map<string, PendingProposal>();
@@ -234,7 +235,7 @@ function createMcpServer() {
         {
           name: 'infra_ping_check',
           description:
-            'Cheap TCP reachability/latency check for a target — use before a full diagnose, or as a lightweight scheduled watch condition.',
+            'Cheap TCP really/latency check for a target — use before a full diagnose, or as a lightweight scheduled watch condition.',
           inputSchema: {
             type: 'object',
             properties: { target_name: { type: 'string' } },
@@ -242,9 +243,28 @@ function createMcpServer() {
           },
         },
         {
+          name: 'infra_query_db',
+          description:
+            'Run a read-only SQL query (SELECT/WITH/SHOW/EXPLAIN/DESCRIBE only — anything else is refused) against a "db" protocol target, for ad-hoc auditing/lookups. Never modifies anything. Use infra_propose_fix + infra_execute_fix for anything that writes data.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              target_name: {
+                type: 'string',
+                description: 'Name of a "db" protocol target from infra_list_targets',
+              },
+              sql: {
+                type: 'string',
+                description: 'A single read-only SQL statement.',
+              },
+            },
+            required: ['target_name', 'sql'],
+          },
+        },
+        {
           name: 'infra_propose_fix',
           description:
-            'Register a proposed remediation command for a target WITHOUT executing it. Use this after infra_diagnose to record the exact command you want to run, your reasoning, and a risk level. You MUST show the returned proposal (command + explanation + risk level) to the user and get their explicit go-ahead in the conversation before ever calling infra_execute_fix — never call infra_execute_fix on your own judgment alone.',
+            'Register a proposed remediation command for a target WITHOUT executing it. Use this after infra_diagnose to record the exact command you want to run, your reasoning, and a risk level. You MUST show the returned proposal (command + explanation + risk level) to the user and get their explicit go-ahead in the conversation before ever calling infra_execute_fix — never call infra_execute_fix on your own judgment alone. Pass the same "category" you used with infra_diagnose so infra_execute_fix can automatically re-verify the fix worked.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -259,6 +279,12 @@ function createMcpServer() {
                 description: 'Why this command fixes the diagnosed root cause.',
               },
               risk_level: { type: 'string', enum: ['low', 'medium', 'high'] },
+              category: {
+                type: 'string',
+                enum: CATEGORY_ENUM,
+                description:
+                  'Optional: the diagnostic category this fix addresses (same enum as infra_diagnose). If supplied, infra_execute_fix automatically re-runs this diagnostic after applying the fix and reports the before/after result.',
+              },
             },
             required: ['target_name', 'command', 'explanation', 'risk_level'],
           },
@@ -266,7 +292,7 @@ function createMcpServer() {
         {
           name: 'infra_execute_fix',
           description:
-            'Execute a PREVIOUSLY PROPOSED fix. Refuses unless proposal_id matches an unexpired proposal from infra_propose_fix for this exact target and confirm_fix is true. This tool will NOT run a different command than the one already shown to the user — if you need to change the command, call infra_propose_fix again first. Only call this after the user has explicitly approved the proposal in the conversation.',
+            'Execute a PREVIOUSLY PROPOSED fix. Refuses unless proposal_id matches an unexpired proposal from infra_propose_fix for this exact target and confirm_fix is true. This tool will NOT run a different command than the one already shown to the user — if you need to change the command, call infra_propose_fix again first. Only call this after the user has explicitly approved the proposal in the conversation. If the proposal included a "category", this automatically re-diagnoses that category after executing and includes the result — use that to verify the fix actually worked instead of assuming success from a clean exit code.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -316,12 +342,31 @@ function createMcpServer() {
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }
 
+        case 'infra_query_db': {
+          const { target_name, sql } = args as { target_name: string; sql: string };
+          const target = await resolveTarget(target_name);
+          if (target.protocol !== 'db') {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text',
+                  text: `infra_query_db only supports "db" protocol targets — "${target_name}" is "${target.protocol}".`,
+                },
+              ],
+            };
+          }
+          const result = await dbQuery(target, sql);
+          return { content: [{ type: 'text', text: result }] };
+        }
+
         case 'infra_propose_fix': {
-          const { target_name, command, explanation, risk_level } = args as {
+          const { target_name, command, explanation, risk_level, category } = args as {
             target_name: string;
             command: string;
             explanation: string;
             risk_level: 'low' | 'medium' | 'high';
+            category?: DiagnosticCategory;
           };
           pruneExpiredProposals();
           // Confirm the target actually exists before registering a proposal against it.
@@ -333,6 +378,7 @@ function createMcpServer() {
             explanation,
             riskLevel: risk_level,
             createdAt: Date.now(),
+            category,
           });
           return {
             content: [
@@ -377,11 +423,21 @@ function createMcpServer() {
           const target = await resolveTarget(target_name);
           const output = await executeFixCommand(target, proposal.command);
           pendingProposals.delete(proposal_id);
+          let verificationText = '';
+          if (proposal.category) {
+            try {
+              const verification = await diagnose(target, proposal.category);
+              verificationText = `\n\nPost-fix verification (re-ran ${proposal.category}):\n${JSON.stringify(verification, null, 2)}`;
+            } catch (verifyErr: unknown) {
+              const verifyMsg = verifyErr instanceof Error ? verifyErr.message : String(verifyErr);
+              verificationText = `\n\nPost-fix verification failed to run: ${verifyMsg}. Fix output above may still be correct \u2014 verify manually if needed.`;
+            }
+          }
           return {
             content: [
               {
                 type: 'text',
-                text: `Executed fix on "${target_name}":\n${proposal.command}\n\nOutput:\n${output}`,
+                text: `Executed fix on "${target_name}":\n${proposal.command}\n\nOutput:\n${output}${verificationText}`,
               },
             ],
           };

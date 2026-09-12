@@ -150,6 +150,35 @@ flowchart TD
 
 ---
 
+## Orchestrator — Multi-Domain System Prompt & Role-Templated Sub-Agents
+
+There is exactly one agent loop (`CoworkAgentRunner`) — it is not six separate agents. What makes it operate like a "Chief Orchestrator" is a dedicated `<orchestrator_operating_model>` block appended to its system prompt (`agent-runner.ts`), which names six domains and maps each to the real tool that already implements it, then states two operating rules: fall back to Infra_RCA/CLI when a GUI action keeps failing on what's really a config/data change, and never report a task complete without concrete verification (re-reading a generated file, re-running a diagnostic, or checking a GUI action's own verification result).
+
+```mermaid
+flowchart TD
+    ORC["<orchestrator_operating_model>\nsystem prompt section"] --> D1[RPA / Desktop → GUI_Operate]
+    ORC --> D2[IT Ops / Infra → Infra_RCA]
+    ORC --> D3[Strategic PM → Office_Tools WBS/Gantt]
+    ORC --> D4[Data / Financial → Office_Tools Excel formulas]
+    ORC --> D5[Corporate Comms → Office_Tools Word/PPT]
+    ORC --> D6[Web Navigation → Chrome]
+
+    ORC --> SPLIT{Task benefits from\nisolated sub-context?}
+    SPLIT -- yes --> SPAWN["spawn_subagent(task, role)"]
+    SPLIT -- no --> DIRECT[Handle directly in\nthe current turn]
+    SPAWN --> ROLE{role param}
+    ROLE --> RP1[rpa_desktop / it_ops_infra /\nstrategic_pm / data_financial /\ncorporate_comms / web_navigator]
+    RP1 --> CHILD["Child session:\nbuildChildSystemPrompt() prepends\nthe matching persona sentence,\nthen the task"]
+    CHILD --> RESULT[Child returns result only\n— no shared conversation history]
+    RESULT --> ORC
+```
+
+For the IT Ops domain specifically, self-verification is not just a prompt instruction — `infra_execute_fix` automatically re-runs `infra_diagnose` for the same category right after applying a fix (when the proposal carried one) and reports the fresh result as "Post-fix verification," so the agent has real evidence instead of trusting a clean exit code. See the Infra RCA section below.
+
+`spawn_subagent` (`subagent-extension.ts`) itself is unchanged from a plumbing standpoint — same concurrency limit (3), same timeout bounds, same tool inheritance. The `role` parameter only changes what gets prepended to the child's system prompt; a spawn with no `role` behaves exactly as before (generic "focused sub-agent" prompt).
+
+---
+
 ## MCP Tool Flow
 
 ```mermaid
@@ -182,12 +211,14 @@ flowchart TD
     XL -- create_excel --> EXJ[ExcelJS\nWorkbook builder]
     XL -- create_word_document --> DCX[docx library\nDocument builder]
     XL -- create_presentation --> PPT[PptxGenJS\nPresentation builder]
-    XL -- source_file set --> WBS[Workbook reader\nsource-driven WBS/roadmap]
+    XL -- roadmap/WBS/Gantt keyword\n+ source_file set --> WBS[Workbook reader\nsource-driven WBS/roadmap]
+    XL -- roadmap/WBS/Gantt keyword\n+ no source_file --> GANTT[office-tools-gantt.ts\ndescription-only Gantt builder]
 
     EXJ -->|styled headers, zebra rows, SUM totals,\nfrozen panes, live formula cells:\nNPV/IRR/STDEV/growth-rate/any formula| XLSX[.xlsx file]
     DCX -->|headings H1-H3, bullet/numbered lists,\ntables, page breaks - type inferred if omitted| DOCX[.docx file]
     PPT -->|title/content/two-column/table slides\n+ native bar/pie/line/doughnut charts| PPTX[.pptx file]
     WBS -->|WBS Summary, Detailed WBS,\nRoadmap Packs, Wave Summary| XLSX
+    GANTT -->|model proposes tasks/dates via Ollama;\nWBS sheet + day-by-day Gantt sheet\nwith solid-fill task bars| XLSX
 
     XLSX & DOCX & PPTX -->|saved to Desktop\nor WORKSPACE_DIR| FS[(Filesystem)]
     FS -->|file path returned| AR
@@ -281,9 +312,20 @@ flowchart TD
     APPROVE -- yes --> EXEC["infra_execute_fix\nrequires confirm_fix=true AND\nthe exact proposal_id"]
     APPROVE -- no --> STOP2([Nothing runs])
     EXEC --> RUN2[Executes ONLY the\npreviously-proposed command]
+    RUN2 --> VERIFY{Proposal carried\na category?}
+    VERIFY -- yes --> REDIAG[Re-run infra_diagnose\nfor that category]
+    REDIAG --> REPORT["Reported as\n'Post-fix verification' —\nreal evidence, not an\nassumed-successful exit code"]
+    VERIFY -- no --> DONE2([Fix output only])
+
+    U2([User wants to audit\nsomething, not fix it]) --> QDB["infra_query_db(target, sql)"]
+    QDB --> GUARD3{SQL is SELECT/WITH/\nSHOW/EXPLAIN/DESCRIBE,\nsingle statement?}
+    GUARD3 -- yes --> RUNQ[Runs against the\ndb-protocol target]
+    GUARD3 -- no --> REFUSE3([Refused —\nuse propose/execute for writes])
 ```
 
-Two independent safety layers on `infra_execute_fix`, both inside the tool's own body (so — like GUI_Operate's `confirm_irreversible` — Autonomous Mode's permission-dialog bypass never reaches them): it refuses without `confirm_fix: true`, and it refuses unless `proposal_id` matches a real, unexpired proposal for that exact target — the model cannot substitute a different command than the one actually shown to the user. Read-only tools (`infra_list_targets`, `infra_diagnose`, `infra_propose_fix`, `infra_ping_check`) default to `allow`; `infra_execute_fix` is deliberately left at the `ask` fallback on top of its own refusal.
+Two independent safety layers on `infra_execute_fix`, both inside the tool's own body (so — like GUI_Operate's `confirm_irreversible` — Autonomous Mode's permission-dialog bypass never reaches them): it refuses without `confirm_fix: true`, and it refuses unless `proposal_id` matches a real, unexpired proposal for that exact target — the model cannot substitute a different command than the one actually shown to the user. Read-only tools (`infra_list_targets`, `infra_diagnose`, `infra_propose_fix`, `infra_ping_check`, `infra_query_db`) default to `allow`; `infra_execute_fix` is deliberately left at the `ask` fallback on top of its own refusal.
+
+`infra_query_db` gives the agent a lightweight way to run an ad-hoc read-only lookup against a `db` target without going through the propose/approve/execute ceremony meant for actual fixes — `assertReadOnlySelect()` in `db-driver.ts` rejects anything but a single SELECT/WITH/SHOW/EXPLAIN/DESCRIBE statement (including semicolon-stacked write attempts), so it's auto-allowed on the same footing as the other read-only tools; any actual data mutation still has to go through the gated fix flow.
 
 DVR/camera (ONVIF) support is intentionally not built — no vendor/model was specified, and it's wired as a pluggable driver slot for later rather than guessed at.
 
@@ -419,7 +461,9 @@ erDiagram
 src/
 ├── main/
 │   ├── agent/          AgentRunner — streams LLM, dispatches tools,
-│   │                   permission hook (Autonomous Mode aware)
+│   │                   permission hook (Autonomous Mode aware),
+│   │                   orchestrator system-prompt section, and
+│   │                   subagent-extension.ts (role-templated spawn_subagent)
 │   ├── config/         ConfigStore, auth-utils (Ollama + Gemini/OpenAI/
 │   │                   Anthropic/OpenRouter API keys)
 │   ├── google/         Google Workspace OAuth token broker
@@ -429,14 +473,17 @@ src/
 │   │   ├── gui-operate-server.ts   Desktop/app RPA (19 tools) + RPA
 │   │   │                           recipe record/replay (5 tools)
 │   │   ├── rpa-recipe-store.ts     JSON store for recorded recipes
+│   │   ├── office-tools-gantt.ts   Pure date/column math for the
+│   │                           description-only Gantt builder
 │   │   ├── office-tools-server.ts  Excel/Word/PPT generation (3 tools,
 │   │   │                           incl. live Excel formulas)
 │   │   ├── google-workspace-server.ts  Gmail/Drive/Calendar
 │   │   ├── ocr-tools-server.ts     Tesseract OCR
 │   │   ├── weather-tools-server.ts Open-Meteo weather
-│   │   ├── infra-rca-server.ts     Remote diagnostics (5 tools);
-│   │   │                           propose/execute-fix split, never
-│   │   │                           auto-executes
+│   │   ├── infra-rca-server.ts     Remote diagnostics (6 tools, incl.
+│   │   │                           read-only infra_query_db); propose/
+│   │   │                           execute-fix split with auto post-fix
+│   │   │                           verification, never auto-executes
 │   │   ├── infra-drivers/          ssh/winrm/snmp/db/onvif diagnostic
 │   │   │                           drivers (onvif is a stub — no named
 │   │   │                           vendor yet)
