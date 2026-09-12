@@ -21,6 +21,7 @@ import {
   pickModelForTask,
   validateGeneratedContent,
 } from '../config/ollama-content';
+import { parseIsoDate, isoDate, computeGanttBarColumns } from './office-tools-gantt';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,17 @@ function isExcelFormulaCell(value: unknown): value is ExcelFormulaCell {
   );
 }
 
+interface ExcelGanttBar {
+  /** 1-based data row number within this sheet (header row is row 1, first data row is row 2). */
+  row: number;
+  /** 1-based first column to fill (inclusive). */
+  startCol: number;
+  /** 1-based last column to fill (inclusive). */
+  endCol: number;
+  /** Optional ARGB fill color, e.g. 'FF4A7DCF'. Defaults to a standard blue. */
+  argb?: string;
+}
+
 interface ExcelSheetDef {
   name: string;
   headers: string[];
@@ -69,6 +81,8 @@ interface ExcelSheetDef {
   add_totals_row?: boolean;
   /** Optional analytics visual: renders a native Excel data-bar over a numeric column. */
   chart?: ExcelChartDef;
+  /** Optional Gantt-style visual: solid-fills a date-range of cells per task row. */
+  ganttBars?: ExcelGanttBar[];
 }
 
 interface CreateExcelParams {
@@ -118,9 +132,12 @@ async function createExcel(params: CreateExcelParams): Promise<string> {
       );
       const dataRow = ws.addRow(rowValues);
       dataRow.eachCell({ includeEmpty: true }, (cell, colNum) => {
-        // Zebra striping
+        // Zebra striping — skipped on Gantt sheets: a timeline needs a blank
+        // background so the ganttBars fill (applied below, after all rows are
+        // added) is the only visual signal, not washed out by shading every
+        // other row across the full day-column width.
         const rowIdx = dataRow.number;
-        if (rowIdx % 2 === 0) {
+        if (rowIdx % 2 === 0 && !sheetDef.ganttBars) {
           cell.fill = {
             type: 'pattern',
             pattern: 'solid',
@@ -219,6 +236,22 @@ async function createExcel(params: CreateExcelParams): Promise<string> {
           },
         ],
       });
+    }
+
+    // Gantt visual: solid-fill the date-span cells for each task row. Reuses the
+    // same direct cell.fill technique already used above for header/zebra styling
+    // — a Gantt timeline is a per-row date-range highlight, not a single numeric
+    // value, so a data-bar/conditional-format rule doesn't fit; a direct fill does.
+    for (const bar of sheetDef.ganttBars || []) {
+      const row = ws.getRow(bar.row);
+      for (let col = bar.startCol; col <= bar.endCol; col++) {
+        row.getCell(col).fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: bar.argb || 'FF4A7DCF' },
+        };
+      }
+      row.commit();
     }
   }
 
@@ -1763,6 +1796,136 @@ async function generateExcelWbsFromWorkbookSource(
   };
 }
 
+// ─── General-purpose Gantt/Roadmap generation (no source workbook needed) ────
+
+interface GanttTask {
+  name: string;
+  phase?: string;
+  owner?: string;
+  start: Date;
+  end: Date;
+}
+
+// Caps the number of day-columns rendered, in case the model returns an
+// unrealistically wide date range — keeps the sheet usable instead of
+// generating hundreds of near-empty columns.
+const MAX_GANTT_DAYS = 180;
+
+async function generateGanttRoadmapFromDescription(
+  desc: string,
+  filename: string
+): Promise<CreateExcelParams | null> {
+  const messages: Array<{ role: 'system' | 'user'; content: string }> = [
+    {
+      role: 'system',
+      content: `You are a project planner. Break the request into a task list for a project roadmap/Gantt chart.
+Return ONLY valid JSON, no markdown fences.
+Schema: {"tasks":[{"name":"Task name","phase":"Phase name","owner":"Owner or team","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}]}
+Use realistic sequential dates, at least 5 tasks, end_date must be on or after start_date for every task.`,
+    },
+    { role: 'user', content: `Create a project roadmap for: ${desc}` },
+  ];
+
+  let tasks: GanttTask[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const attemptMessages =
+      attempt === 0
+        ? messages
+        : messages.map((m, i) =>
+            i === 0 ? { ...m, content: m.content + STRICT_RETRY_REMINDER } : m
+          );
+    const content = await callOllamaChat(attemptMessages, {
+      model: pickModelForTask('simple'),
+      timeoutMs: 120000,
+      numPredict: 4000,
+    });
+    if (!content) continue;
+    const json = extractJsonObject(content);
+    if (!json) continue;
+    try {
+      const parsed = JSON.parse(json) as { tasks?: unknown };
+      if (!Array.isArray(parsed.tasks)) continue;
+      const parsedTasks: GanttTask[] = [];
+      for (const raw of parsed.tasks) {
+        if (!raw || typeof raw !== 'object') continue;
+        const t = raw as Record<string, unknown>;
+        const name = typeof t.name === 'string' ? t.name.trim() : '';
+        const start = parseIsoDate(t.start_date);
+        const end = parseIsoDate(t.end_date);
+        if (!name || !start || !end || end.getTime() < start.getTime()) continue;
+        parsedTasks.push({
+          name,
+          phase: typeof t.phase === 'string' ? t.phase.trim() : undefined,
+          owner: typeof t.owner === 'string' ? t.owner.trim() : undefined,
+          start,
+          end,
+        });
+      }
+      if (parsedTasks.length > 0) {
+        tasks = parsedTasks;
+        break;
+      }
+    } catch {
+      continue;
+    }
+  }
+  if (tasks.length === 0) return null;
+
+  const wbsRows: ExcelCellValue[][] = tasks.map((t) => [
+    t.name,
+    t.phase || '',
+    t.owner || '',
+    isoDate(t.start),
+    isoDate(t.end),
+    Math.round((t.end.getTime() - t.start.getTime()) / 86_400_000) + 1,
+  ]);
+
+  const minStart = new Date(Math.min(...tasks.map((t) => t.start.getTime())));
+  let maxEnd = new Date(Math.max(...tasks.map((t) => t.end.getTime())));
+  const totalDays = Math.round((maxEnd.getTime() - minStart.getTime()) / 86_400_000) + 1;
+  if (totalDays > MAX_GANTT_DAYS) {
+    maxEnd = new Date(minStart.getTime() + (MAX_GANTT_DAYS - 1) * 86_400_000);
+  }
+
+  const headerDates: Date[] = [];
+  for (
+    const d = new Date(minStart);
+    d.getTime() <= maxEnd.getTime();
+    d.setUTCDate(d.getUTCDate() + 1)
+  ) {
+    headerDates.push(new Date(d));
+  }
+
+  const ganttHeaders = ['Task', ...headerDates.map((d) => isoDate(d))];
+  const ganttRows: ExcelCellValue[][] = tasks.map((t) => [t.name, ...headerDates.map(() => '')]);
+  const ganttBars: ExcelGanttBar[] = [];
+  tasks.forEach((t, idx) => {
+    const cols = computeGanttBarColumns(headerDates, t.start, t.end);
+    if (cols) {
+      ganttBars.push({ row: idx + 2, startCol: cols.startCol, endCol: cols.endCol });
+    }
+  });
+
+  return {
+    filename,
+    sheets: [
+      {
+        name: 'WBS',
+        headers: ['Task', 'Phase', 'Owner', 'Start', 'End', 'Duration (days)'],
+        rows: wbsRows,
+        column_widths: [40, 20, 20, 14, 14, 16],
+      },
+      {
+        name: 'Gantt',
+        headers: ganttHeaders,
+        rows: ganttRows,
+        column_widths: [40, ...headerDates.map(() => 4)],
+        ganttBars,
+      },
+    ],
+  };
+}
+
 async function generatePresentationFromWorkbookSource(
   sourceFile: string,
   filename: string
@@ -2371,7 +2534,7 @@ function createMcpServer() {
         {
           name: 'create_excel',
           description:
-            'Create an Excel (.xlsx) spreadsheet with one or more sheets. Supports styled headers, data rows, auto-totals, column widths, frozen header rows, and live formula cells (e.g. NPV, IRR, STDEV, AVERAGE, TREND, growth-rate calculations). Use this whenever the user asks for a spreadsheet, table of data, financial model, statistical analysis, report, tracker, or anything in Excel format.',
+            'Create an Excel (.xlsx) spreadsheet with one or more sheets. Supports styled headers, data rows, auto-totals, column widths, frozen header rows, and live formula cells (e.g. NPV, IRR, STDEV, AVERAGE, TREND, growth-rate calculations). Use this whenever the user asks for a spreadsheet, table of data, financial model, statistical analysis, report, tracker, or anything in Excel format. Mentioning "roadmap", "WBS", "Gantt", or "timeline" in the description auto-generates a WBS + Gantt-chart workbook (from an attached workbook via source_file, or from scratch off the description alone).',
           inputSchema: {
             type: 'object',
             properties: {
@@ -2717,11 +2880,12 @@ function createMcpServer() {
             const fname =
               raw.filename || (!looksLikeAssistantEcho(desc) && slugify(desc)) || 'spreadsheet';
             const shouldBuildWbs =
-              /\b(wbs|work breakdown|project plan|tasks? and sub[- ]?tasks?|task breakdown|implementation plan)\b/i.test(
+              /\b(wbs|work breakdown|project plan|tasks? and sub[- ]?tasks?|task breakdown|implementation plan|roadmap|gantt|timeline)\b/i.test(
                 desc
               );
-            const workbookParams =
-              shouldBuildWbs && raw.source_file
+            const workbookParams = !shouldBuildWbs
+              ? null
+              : raw.source_file
                 ? await generateExcelWbsFromWorkbookSource(raw.source_file, fname).catch(
                     (error) => {
                       process.stderr.write(
@@ -2730,7 +2894,12 @@ function createMcpServer() {
                       return null;
                     }
                   )
-                : null;
+                : await generateGanttRoadmapFromDescription(desc, fname).catch((error) => {
+                    process.stderr.write(
+                      `[office-tools-server] Gantt roadmap generation failed: ${error instanceof Error ? error.stack || error.message : String(error)}\n`
+                    );
+                    return null;
+                  });
             const aiJson = workbookParams ? null : await callOllamaForContent(desc, 'excel');
             if (workbookParams) {
               params = workbookParams;

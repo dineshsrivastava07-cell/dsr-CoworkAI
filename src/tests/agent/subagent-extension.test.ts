@@ -13,7 +13,7 @@ vi.mock('../../main/config/config-store', () => ({
   },
 }));
 
-import { SubagentExtension } from '../../main/agent/subagent-extension';
+import { SubagentExtension, buildChildSystemPrompt } from '../../main/agent/subagent-extension';
 
 type ToolExecuteFn = (id: string, params: unknown) => Promise<unknown>;
 
@@ -213,6 +213,37 @@ describe('SubagentExtension', () => {
 
       // Even though execution failed (model not found), counter should be back to 0
       expect(state.active).toBe(0);
+    });
+  });
+
+  describe('buildChildSystemPrompt role templating', () => {
+    it('produces the original generic prompt when no role is given (backward compatible)', () => {
+      const prompt = buildChildSystemPrompt('do the thing');
+      expect(prompt).toContain('You are a focused sub-agent.');
+      expect(prompt).toContain('## Task');
+      expect(prompt).toContain('do the thing');
+      expect(prompt).not.toContain('specialize');
+    });
+
+    it('prepends the matching role persona when a role is given', () => {
+      const prompt = buildChildSystemPrompt('audit the database', undefined, 'it_ops_infra');
+      expect(prompt).toContain('You are a focused sub-agent.');
+      expect(prompt).toContain('infrastructure diagnostics via the Infra_RCA tools');
+      expect(prompt).toContain('## Task');
+      expect(prompt).toContain('audit the database');
+    });
+
+    it('still includes the expected output format section when supplied alongside a role', () => {
+      const prompt = buildChildSystemPrompt('build a model', 'A single number', 'data_financial');
+      expect(prompt).toContain('financial analysis via Office_Tools');
+      expect(prompt).toContain('## Expected Output Format');
+      expect(prompt).toContain('A single number');
+    });
+
+    it('ignores an unrecognized role value gracefully', () => {
+      const prompt = buildChildSystemPrompt('do the thing', undefined, 'not_a_real_role' as never);
+      expect(prompt).toContain('You are a focused sub-agent.');
+      expect(prompt).toContain('do the thing');
     });
   });
 });
