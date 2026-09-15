@@ -25,14 +25,14 @@ This guide describes the current Electron desktop application. Updating GitHub s
 
 ## 1. Purpose and supported scope
 
-| Capability          | What it does                                                                     | What setup alone does not establish                                                            |
-| ------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Infra RCA inventory | Stores named SSH, WinRM, SNMP and database targets, including credentials        | Connectivity, valid login, diagnostic privileges or continuous monitoring                      |
-| Bulk import         | Validates CSV/JSON and saves up to 10,000 systems per batch                      | Automatic discovery or deployment of workers to those computers                                |
-| Infra RCA connector | Gives the agent tools to discover configured targets, diagnose and propose fixes | Permission to apply every proposal                                                             |
-| RPA connector       | Makes desktop input, screenshots, vision and recipe tools available              | A process definition for each ERP, HRMS or desktop application                                 |
-| RPA workflow form   | Creates instructions and starts a supervised setup conversation                  | A saved executable recipe or proof of business accuracy                                        |
-| Desktop recipe      | Stores supported desktop actions for named replay                                | Browser/API action recording, distributed execution or a domain-specific correctness guarantee |
+| Capability          | What it does                                                                                 | What setup alone does not establish                                                            |
+| ------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Infra RCA inventory | Stores named SSH, WinRM, SNMP and database targets, including credentials                    | Connectivity, valid login, diagnostic privileges or continuous monitoring                      |
+| Bulk import         | Validates CSV/JSON and saves up to 10,000 systems per batch                                  | Automatic discovery or deployment of workers to those computers                                |
+| Infra RCA connector | Gives the agent tools to discover configured targets, diagnose and propose fixes             | Permission to apply every proposal                                                             |
+| RPA connector       | Makes desktop input, screenshots, vision and recipe tools available                          | A process definition for each ERP, HRMS or desktop application                                 |
+| RPA workflow form   | Configures execution mode, encrypted credential profile reference and schedule/watch trigger | A saved executable recipe or proof of business accuracy                                        |
+| Desktop recipe      | Stores supported desktop actions for named replay                                            | Browser/API action recording, distributed execution or a domain-specific correctness guarantee |
 
 **Terms:** a _target_ is one configured infrastructure endpoint; a _connector_ is the tool service; a _workflow_ is the business process; a _recipe_ is its recorded desktop-action sequence; a _success check_ confirms the actual business result after execution.
 
@@ -196,13 +196,15 @@ nextOffset is null. Report the total and names. Do not run diagnostics.
 1. Open **Settings → MCP Connectors → RPA / Desktop automation**.
 2. Click **Enable RPA** and wait for **Connected**.
 3. Confirm the intended provider/model under **Settings → API**.
-4. Sign in to the test application manually. Confirm the correct tenant, account, window and, for remote sessions, remote host.
+4. Sign in to the test application manually for the first recording, or save an encrypted RPA credential profile in the workflow form. Confirm the correct tenant, account, window and, for remote sessions, remote host.
 5. On macOS, open **System Settings → Privacy & Security → Accessibility** and allow the application that actually runs the automation. A source development launch may appear as Electron; a packaged build may show its app name. Follow any additional permission prompt for the actual helper process. [Apple accessibility instructions](https://support.apple.com/en-au/guide/mac-help/mh43185/mac).
 6. In **Privacy & Security**, review **Screen & System Audio Recording** (called Screen Recording on some macOS versions), allow the app's screen access, and follow any restart prompt. [Apple screen recording instructions](https://support.apple.com/en-au/guide/mac-help/mchl592e5686/mac).
-7. In chat, request: `Use get_displays and report the available displays. Do not click or type.` Confirm the intended display.
+7. In chat, request: `Use get_runtime_status, then get_displays, and report readiness and available displays. Do not click or type.` Resolve every missing prerequisite and confirm the intended display.
 8. Request a fresh screenshot of the test app, then ask `gui_verify_vision` a known question about a visible label. This separately tests screen capture and the configured vision route. Do not request a click until these checks pass.
 
 For Windows, use an available interactive desktop and a test app the current user can operate. Do not assume an elevated window, lock screen, secure credential dialog or remote-session boundary is controllable just because the connector is Connected.
+
+For Linux, launch V-Coworker in the signed-in graphical user session. The connector supports X11 and XWayland when `DISPLAY` is available and host policy allows synthetic input. Install the organization-approved packages that provide `xdotool`, `xrandr`, and one screenshot backend (`maim`, `scrot`, or `gnome-screenshot`). Run `get_runtime_status` to verify the detected backends. Native Wayland protected surfaces may reject global capture/input; use an approved desktop portal or an X11/XWayland execution session where organizational policy permits it.
 
 ### 6.2 Select the appropriate application route
 
@@ -228,7 +230,7 @@ GUI_Operate runs on the execution desktop. A remote window is one visible surfac
 7. Enter **Success check and evidence**: specify what will be reopened/read back and the expected business values.
 8. Click **Prepare instructions** and review the resulting brief. Use **Copy instructions** if needed.
 9. Click **Review setup in chat**. The button requires connected RPA and a configured model. Expect a new setup conversation requesting a plan before application operations.
-10. Review the plan with the application owner. Filling this form does not save a recipe; the conversation carries the setup instructions and subsequent evidence.
+10. Review the plan with the application owner. Save the recipe from the conversation, then use **Create autonomous job** for a daily or HTTP change-triggered run. The scheduled agent resolves the credential profile inside GUI_Operate and reports evidence/postcondition status.
 
 Use the downloadable [workflow brief](user-guide-templates/rpa-workflow-brief.md) for process ownership, sample inputs, exception cases and sign-off.
 
@@ -370,24 +372,28 @@ Use the chat tool `infra_capabilities` to inspect the supported read-only catego
 
 ### RPA and scheduling
 
-| Symptom                                          | Checks and corrective steps                                                                                                                     | Retest          |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
-| Only Enable/Disable appears                      | Expand **Configure a business workflow**; if absent, update/restart the app build                                                               | RPA-01          |
-| Review setup in chat unavailable                 | Confirm RPA Connected and provider/model configured; complete required brief fields                                                             | RPA-04          |
-| Screenshot fails or is blank                     | Confirm intended display, app/window availability and macOS screen permission for the actual running app/helper; follow restart prompts         | RPA-02          |
-| Screenshot works but vision fails                | Check image support, API route, credentials, quotas and model errors; a working text model is insufficient                                      | RPA-03          |
-| Vision points to the wrong element               | Stop. Check account/app/display, scaling and dialogs; make the semantic description specific; repeat read-only location checks                  | RPA-03 / RPA-07 |
-| Click/type fails despite connection              | Check Accessibility permissions, foreground window, protected/elevated surface and any tool denial; do not bypass a denied app or secure dialog | RPA-05          |
-| Screenshot output path refused                   | Let the screenshot tool use its allowed default location; the implementation restricts custom paths to its screenshots directory                | RPA-02          |
-| Recipe not found                                 | Request `list_recipes`; check exact name, machine and app-user context. Confirm `save_recipe` actually succeeded                                | RPA-06          |
-| Recipe exists but wrong app opens/receives input | Reestablish app context and starting state. App metadata does not guarantee automatic launch/focus during replay                                | RPA-06          |
-| Recipe fails after a window move                 | Inspect the failed semantic target and re-record/refine the step. Do not substitute stale coordinates to force a pass                           | RPA-07          |
-| Browser actions were not recorded                | Desktop recipes support only their listed primitives. Keep browser-tool/API tasks as their own workflow instructions                            | RPA-04          |
-| Remote Desktop/Citrix task is unreliable         | Confirm remote host/session, unlocked state, resolution and client focus; exclude competing keyboard/mouse jobs                                 | RPA-08          |
-| Task says success but output is wrong            | Fail acceptance. Compare the actual record/file with expected values and improve explicit checks                                                | RPA-09          |
-| Submission timed out                             | Read back the application before retrying; reconcile duplicates or partial completion with the owner                                            | RPA-09          |
-| Schedule did not complete                        | Check enabled state, Next run/local time, app/session availability, credentials, pending approval and execution-session error                   | OPS-01          |
-| Disabling schedule did not stop activity         | Disable affects future runs. Stop the currently running session separately                                                                      | OPS-02          |
+| Symptom                                          | Checks and corrective steps                                                                                                                                     | Retest          |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| Only Enable/Disable appears                      | Expand **Configure a business workflow**; if absent, update/restart the app build                                                                               | RPA-01          |
+| Review setup in chat unavailable                 | Confirm RPA Connected and provider/model configured; complete required brief fields                                                                             | RPA-04          |
+| Screenshot fails or is blank                     | Confirm intended display, app/window availability and macOS screen permission for the actual running app/helper; follow restart prompts                         | RPA-02          |
+| Screenshot works but vision fails                | Check image support, API route, credentials, quotas and model errors; a working text model is insufficient                                                      | RPA-03          |
+| Vision points to the wrong element               | Stop. Check account/app/display, scaling and dialogs; make the semantic description specific; repeat read-only location checks                                  | RPA-03 / RPA-07 |
+| Click/type fails despite connection              | Check Accessibility permissions, foreground window, protected/elevated surface and any tool denial; do not bypass a denied app or secure dialog                 | RPA-05          |
+| Screenshot output path refused                   | Let the screenshot tool use its allowed default location; the implementation restricts custom paths to its screenshots directory                                | RPA-02          |
+| Recipe not found                                 | Request `list_recipes`; check exact name, machine and app-user context. Confirm `save_recipe` actually succeeded                                                | RPA-06          |
+| Recipe exists but wrong app opens/receives input | Reestablish app context and starting state. App metadata does not guarantee automatic launch/focus during replay                                                | RPA-06          |
+| Recipe fails after a window move                 | Inspect the failed semantic target and re-record/refine the step. Do not substitute stale coordinates to force a pass                                           | RPA-07          |
+| Browser actions were not recorded                | Desktop recipes support only their listed primitives. Keep browser-tool/API tasks as their own workflow instructions                                            | RPA-04          |
+| Remote Desktop/Citrix task is unreliable         | Confirm remote host/session, unlocked state, resolution and client focus; exclude competing keyboard/mouse jobs                                                 | RPA-08          |
+| Task says success but output is wrong            | Fail acceptance. Compare the actual record/file with expected values and improve explicit checks                                                                | RPA-09          |
+| Submission timed out                             | Read back the application before retrying; reconcile duplicates or partial completion with the owner                                                            | RPA-09          |
+| Credential profile unavailable                   | Save the profile in the RPA workflow form, use the exact profile name in `start_recipe_recording`/`run_recipe`, and restart the GUI connector after changing it | RPA-06          |
+| Headless recipe rejected                         | GUI recipes require a visible desktop. Move browser/API work to its native connector before selecting headless mode                                             | RPA-04          |
+| Linux runtime status is not ready                | Start V-Coworker in the signed-in graphical session, set `DISPLAY`, install approved `xdotool`/`xrandr` and a screenshot backend, then restart and retest       | RPA-02          |
+| Linux Wayland click or capture is denied         | Confirm XWayland and compositor policy. Protected/native Wayland surfaces may require an approved portal or an X11 execution session                            | RPA-05          |
+| Schedule did not complete                        | Check enabled state, Next run/local time, app/session availability, credential profile, Autonomous Mode, pending approval and execution-session error           | OPS-01          |
+| Disabling schedule did not stop activity         | Disable affects future runs. Stop the currently running session separately                                                                                      | OPS-02          |
 
 ## 10. IT acceptance tests
 
@@ -412,7 +418,7 @@ Run these in an approved test environment. The procedures below are **tests to e
 
 | ID     | Steps                                                                                           | Expected result / evidence                                                                                      |
 | ------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| RPA-01 | Enable RPA; list saved recipes without running one                                              | Connected; actual recipe-list tool result, possibly empty                                                       |
+| RPA-01 | Enable RPA; call `get_runtime_status`; list saved recipes without running one                   | Connected; runtime ready with expected platform backends; actual recipe-list result, possibly empty             |
 | RPA-02 | Call `get_displays`; capture a fresh test-app screenshot                                        | Intended display and current readable screen; no unrelated secrets in retained evidence                         |
 | RPA-03 | Ask vision to identify a known visible label without clicking                                   | Correct label/target; provider request succeeds. Wrong/ambiguous answer is a failure                            |
 | RPA-04 | Fill the workflow form with a known success check; Prepare; Review setup in chat                | Required data reaches the new setup conversation; plan review precedes operation; no false “recipe saved” claim |

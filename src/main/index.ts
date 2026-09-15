@@ -73,6 +73,7 @@ import {
 } from './google';
 import { startInfraRcaBroker, stopInfraRcaBroker } from './mcp/infra-rca-broker';
 import { infraRcaStore } from './mcp/infra-rca-store';
+import { rpaCredentialStore } from './mcp/rpa-credential-store';
 import { checkInfraConnection } from './mcp/infra-connection-check';
 import {
   ScheduledTaskManager,
@@ -2368,6 +2369,40 @@ ipcMain.handle('google.disconnectAudience', async () => {
   const result = await disconnectGoogleAccount();
   await setGoogleWorkspaceServerEnabled(false);
   return result;
+});
+
+ipcMain.handle('rpaCredentials.list', () => rpaCredentialStore.list());
+ipcMain.handle(
+  'rpaCredentials.save',
+  async (_event, profile: Parameters<typeof rpaCredentialStore.save>[0]) => {
+    try {
+      rpaCredentialStore.save(profile);
+      if (sessionManager) {
+        await sessionManager.getMCPManager().restartServerByName('GUI_Operate');
+        sessionManager.invalidateMcpServersCache();
+      }
+      return { success: true };
+    } catch (error) {
+      logError('[RPA] Failed to save credential profile:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to save credential profile.',
+      };
+    }
+  }
+);
+ipcMain.handle('rpaCredentials.delete', async (_event, name: string) => {
+  try {
+    rpaCredentialStore.delete(name);
+    if (sessionManager) {
+      await sessionManager.getMCPManager().restartServerByName('GUI_Operate');
+      sessionManager.invalidateMcpServersCache();
+    }
+    return { success: true };
+  } catch (error) {
+    logError('[RPA] Failed to delete credential profile:', error);
+    return { success: false, error: 'Failed to delete credential profile.' };
+  }
 });
 
 // Infra RCA target CRUD. Connector enablement is independent of target configuration.

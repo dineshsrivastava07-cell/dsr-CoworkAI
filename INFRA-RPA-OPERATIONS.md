@@ -62,16 +62,22 @@ Example chat requests:
 
 ## Configure RPA for a business process
 
-**Enable RPA makes tools available. It does not configure every application or create a validated automation.**
+**Enable RPA makes tools available. The workflow form now configures autonomous execution, encrypted credential profiles and persistent schedule/watch triggers; a supervised recording and business verification are still required before unattended use.**
 
-1. Open **Settings → MCP Connectors → RPA / Desktop automation → Enable RPA**. Confirm **Connected**. Configure a working vision-capable provider for visual operations.
+1. Open **Settings → MCP Connectors → RPA / Desktop automation → Enable RPA**. Confirm **Connected**. Configure a working vision-capable provider for visual operations. Ask the agent to call `get_runtime_status` and resolve every missing prerequisite before recording.
 2. Open the intended app, account and tenant. Sign in manually. On macOS grant Accessibility and Screen Recording permissions when prompted. Ensure the execution desktop is available and unlocked.
 3. Expand **Configure a business workflow**. Give the task a unique name and select local desktop, website, or Remote Desktop/Citrix.
-4. Enter the application/URL/remote host, input parameters, ordered business steps and a concrete success check. Do not place passwords or OTPs in the form or recipe.
+4. Enter the application/URL/remote host, input parameters, ordered business steps and a concrete success check. Save an encrypted credential profile in the form when autonomous login is required; passwords and OTPs never enter the prompt or recipe.
 5. Choose **Prepare instructions** to inspect/copy the brief, or **Review setup in chat** to start a planning conversation. Review the proposed plan before application operations.
 6. Run a small sample against a test account. For desktop primitives, ask the agent to record each supported step and save a named recipe. Recording is agent-mediated; the connector is not a passive global recorder of everything you do with the mouse.
 7. Replay with representative inputs and after moving the window. Re-open the resulting record/file and compare business values with the expected result.
-8. Schedule only a verified process. Use **Settings → Schedule** with the recipe name, parameters, expected checks and an error-reporting instruction. Interactive login/MFA or required approvals may prevent unattended execution. Run one UI automation per interactive desktop to avoid conflicting focus, keyboard and mouse actions.
+8. Select **UI**, **Background** or **Headless** execution mode. Headless is only for browser/API workflows; GUI recipes need an available desktop. Use **Create autonomous job** for a daily schedule or HTTP change trigger, or manage the same task under **Settings → Schedule**. Enable **Autonomous Mode** for unattended safe tools. Interactive MFA, a missing profile, unexpected dialogs or required approvals stop the job safely.
+
+Platform setup:
+
+- macOS: grant Accessibility and Screen Recording to the running app/helper.
+- Windows: run in an unlocked interactive session; secure desktop/UAC and higher-integrity windows can reject input.
+- Linux: run in the signed-in X11/XWayland session with `DISPLAY`, `xdotool`, `xrandr`, and `maim`, `scrot`, or `gnome-screenshot`. Native Wayland protected surfaces depend on compositor policy and may require an organization-approved portal or X11 execution session.
 
 Example workflow brief:
 
@@ -85,7 +91,7 @@ Success check: reopen CSV; verify report date, department, unique employee IDs,
 expected employee count and absence of duplicate rows; report the saved path
 ```
 
-Use a separate named workflow for attendance export, employee onboarding, ERP invoice entry, reconciliation or other distinct tasks. Desktop recipes currently record `click`, `type_text`, `key_press`, `scroll`, `drag` and `wait`. `{{parameter}}` placeholders support changing business values. `list_recipes` lists saved recipes and `run_recipe` requests replay. Browser-tool/API calls are not stored as desktop recipe steps.
+Use a separate named workflow for attendance export, employee onboarding, ERP invoice entry, reconciliation or other distinct tasks. Desktop recipes record `click`, `type_text`, `key_press`, `scroll`, `drag` and `wait`, plus semantic target descriptions. `{{parameter}}` placeholders support changing business values; `{{credential.username}}` and `{{credential.password}}` resolve only inside the connector from the selected encrypted profile. `run_recipe` captures before/after screenshots and returns postcondition status for the agent to verify. Browser-tool/API calls are not stored as desktop recipe steps.
 
 ## Choose the route and verify accuracy
 

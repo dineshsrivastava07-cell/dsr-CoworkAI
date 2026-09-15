@@ -214,7 +214,7 @@ flowchart LR
     MCPMgr --> Reg{Tool Registry}
     Reg --> FS[Built-in: read/write/edit/glob/grep/bash]
     Reg --> BR[Chrome\nbrowser automation]
-    Reg --> RPA[GUI_Operate\ndesktop/app RPA 19 tools\nplus 5 recipe tools]
+    Reg --> RPA[GUI_Operate\ndesktop/app RPA 20 tools\nplus 5 recipe tools]
     Reg --> OT[Office_Tools\ncreate_excel / create_word_document\ncreate_presentation]
     Reg --> GW[Google_Workspace\nGmail/Drive/Calendar]
     Reg --> OCR[OCR_Tools]
@@ -378,7 +378,7 @@ DVR/camera (ONVIF) support is intentionally not built — no vendor/model was sp
 
 RPA is opt-in through **Settings → MCP Connectors → RPA / Desktop automation → Enable RPA**. The card reuses an existing `GUI_Operate` configuration or creates the bundled preset, then saves through `mcp.saveServer`. The main process connects the server, discovers tools, and invalidates cached agent sessions. Disabling disconnects the connector; the saved disabled configuration persists across restarts. The card reports connection state and tool count, and refreshes the saved state after a connection failure.
 
-`RpaWorkflowSetup` collects a business brief and `buildRpaWorkflowPrompt` translates it into a review request carrying inputs, steps and application-level success checks. **Review setup in chat** uses the existing `useIPC.startSession` path. It is a planning handoff: no recipe is saved and no domain is certified by completing the form. The agent records supported desktop primitives only after supervised setup; browser/API workflows use their respective tools. Instructions to verify outputs are distinct from enforced recipe-engine postconditions and live acceptance evidence.
+`RpaWorkflowSetup` collects a business brief plus execution mode, encrypted credential-profile reference and manual/schedule/watch trigger. `buildRpaWorkflowPrompt` translates it into an agentic run contract carrying inputs, steps and application-level success checks. **Review setup in chat** uses the existing `useIPC.startSession` path for the initial supervised recording; **Create autonomous job** persists a daily or HTTP change-triggered scheduled agent task through the existing scheduler. The scheduled agent invokes the saved recipe, resolves credentials inside the GUI connector, captures before/after evidence and reports postcondition status. Headless mode is explicitly rejected for GUI recipes; browser/API workflows must use their native tools.
 
 ```mermaid
 flowchart LR
@@ -391,7 +391,7 @@ flowchart LR
     IPC --> CACHE[Invalidate agent tool cache]
 ```
 
-Five tools added to `GUI_Operate` turn its existing click/type/scroll/drag primitives into reusable automations for recurring tasks in any desktop app (ERP or otherwise): `start_recipe_recording`, `record_recipe_step`, `save_recipe`, `list_recipes`, `run_recipe`. Recipes are stored as JSON (name, target app, ordered steps) — no new SQLite table needed for this data volume.
+Five tools added to `GUI_Operate` turn its existing click/type/scroll/drag primitives into reusable automations for recurring tasks in any desktop app (ERP or otherwise): `start_recipe_recording`, `record_recipe_step`, `save_recipe`, `list_recipes`, `run_recipe`. `get_runtime_status` preflights the platform driver and reports missing dependencies or desktop-session restrictions. Recipes are stored as JSON with execution mode, opaque credential-profile reference, success check and ordered steps; no password is stored in recipe metadata.
 
 ```mermaid
 flowchart TD
@@ -410,7 +410,7 @@ flowchart TD
     EXEC3 --> STEP
 ```
 
-Replay re-resolves each `click` step semantically via the existing vision-based element locator, using the step's saved description ("the Save button"). It stops if relocation fails. Replay reuses the same tool handlers as live use, so `GUI_Operate`'s existing safety checks (irreversible-click confirmation, emergency stop, app denylist) also apply to recipe steps.
+Replay captures an initial screenshot, re-resolves each `click` step semantically via the existing vision-based element locator, using the step's saved description ("the Save button"), and captures a final screenshot. It stops if relocation fails, a credential profile is missing, headless mode is requested for GUI steps, or a safety check blocks an action. Replay reuses the same tool handlers as live use, so `GUI_Operate`'s existing safety checks (irreversible-click confirmation, emergency stop, app denylist) also apply to recipe steps. The returned business postcondition is marked `requires_agent_verification`; the autonomous agent must read back the actual record/file/status before reporting success.
 
 ---
 
@@ -484,31 +484,31 @@ erDiagram
 
 ## Technology Stack
 
-| Layer                 | Technology                                                                                                |
-| --------------------- | --------------------------------------------------------------------------------------------------------- |
-| Desktop shell         | Electron 41                                                                                               |
-| UI framework          | React 18 + Vite 7                                                                                         |
-| Styling               | Tailwind CSS 3                                                                                            |
-| State                 | Zustand                                                                                                   |
-| Local LLM             | Ollama + Gemma 4 (26b / e4b)                                                                              |
-| Cloud model providers | Gemini, OpenAI (ChatGPT), Anthropic, OpenRouter — API key auth                                            |
-| Google Workspace auth | Bundled OAuth token broker (Gmail/Drive/Calendar only, not model access)                                  |
-| IPC                   | Electron contextBridge (preload)                                                                          |
-| Persistence           | electron-store (encrypted) + SQLite (better-sqlite3, WAL mode)                                            |
-| MCP                   | @modelcontextprotocol/client + server                                                                     |
-| Office — Excel        | ExcelJS 4.4 (incl. live formula cells)                                                                    |
-| Office — Word         | docx 9.7                                                                                                  |
-| Office — PowerPoint   | PptxGenJS 4.0 (incl. native charts)                                                                       |
-| Desktop RPA           | GUI_Operate (custom, 19 tools + 5 recipe tools: click/type/drag/scroll/vision/app-tracking/record-replay) |
-| Browser automation    | chrome-devtools-mcp                                                                                       |
-| OCR                   | Tesseract (via OCR_Tools MCP server)                                                                      |
-| Weather               | Open-Meteo (via Weather_Tools MCP server)                                                                 |
-| Infra diagnostics     | ssh2, net-snmp, pg, mysql2, @netcuras/nodejs-winrm (via Infra_RCA MCP server)                             |
-| Sandbox (macOS)       | Lima VM                                                                                                   |
-| Sandbox (Windows)     | WSL2                                                                                                      |
-| Remote                | Slack Bolt SDK (+ other channel adapters) + ngrok + VNC                                                   |
-| Code signing          | /usr/bin/codesign (ad-hoc, entitlements plist)                                                            |
-| Language              | TypeScript 5                                                                                              |
+| Layer                 | Technology                                                                                                                  |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Desktop shell         | Electron 41                                                                                                                 |
+| UI framework          | React 18 + Vite 7                                                                                                           |
+| Styling               | Tailwind CSS 3                                                                                                              |
+| State                 | Zustand                                                                                                                     |
+| Local LLM             | Ollama + Gemma 4 (26b / e4b)                                                                                                |
+| Cloud model providers | Gemini, OpenAI (ChatGPT), Anthropic, OpenRouter — API key auth                                                              |
+| Google Workspace auth | Bundled OAuth token broker (Gmail/Drive/Calendar only, not model access)                                                    |
+| IPC                   | Electron contextBridge (preload)                                                                                            |
+| Persistence           | electron-store (encrypted) + SQLite (better-sqlite3, WAL mode)                                                              |
+| MCP                   | @modelcontextprotocol/client + server                                                                                       |
+| Office — Excel        | ExcelJS 4.4 (incl. live formula cells)                                                                                      |
+| Office — Word         | docx 9.7                                                                                                                    |
+| Office — PowerPoint   | PptxGenJS 4.0 (incl. native charts)                                                                                         |
+| Desktop RPA           | GUI_Operate (custom, 20 tools + 5 recipe tools: runtime preflight/click/type/drag/scroll/vision/app-tracking/record-replay) |
+| Browser automation    | chrome-devtools-mcp                                                                                                         |
+| OCR                   | Tesseract (via OCR_Tools MCP server)                                                                                        |
+| Weather               | Open-Meteo (via Weather_Tools MCP server)                                                                                   |
+| Infra diagnostics     | ssh2, net-snmp, pg, mysql2, @netcuras/nodejs-winrm (via Infra_RCA MCP server)                                               |
+| Sandbox (macOS)       | Lima VM                                                                                                                     |
+| Sandbox (Windows)     | WSL2                                                                                                                        |
+| Remote                | Slack Bolt SDK (+ other channel adapters) + ngrok + VNC                                                                     |
+| Code signing          | /usr/bin/codesign (ad-hoc, entitlements plist)                                                                              |
+| Language              | TypeScript 5                                                                                                                |
 
 ---
 
@@ -527,8 +527,10 @@ src/
 │   ├── mcp/            MCP server lifecycle, tool registry
 │   │   ├── mcp-manager.ts          Server lifecycle, tool dispatch,
 │   │   │                           oversized-result truncation
-│   │   ├── gui-operate-server.ts   Desktop/app RPA (19 tools) + RPA
+│   │   ├── gui-operate-server.ts   Desktop/app RPA (20 tools) + RPA
 │   │   │                           recipe record/replay (5 tools)
+│   │   ├── linux-desktop-driver.ts Linux X11/XWayland input, display,
+│   │   │                           screenshot and runtime diagnostics
 │   │   ├── rpa-recipe-store.ts     JSON store for recorded recipes
 │   │   ├── office-tools-gantt.ts   Pure date/column math for the
 │   │                           description-only Gantt builder

@@ -24,4 +24,19 @@ describe('RPA workflow setup handoff', () => {
       'does not deploy workers to remote machines'
     );
   });
+
+  it('includes autonomous execution, credential profile and evidence requirements', () => {
+    const prompt = buildRpaWorkflowPrompt({
+      ...brief,
+      executionMode: 'background',
+      trigger: 'schedule',
+      credentialProfile: 'hrms-service-account',
+      scheduleAt: '2030-01-01T09:00',
+    });
+    expect(prompt).toContain('Execution mode: background');
+    expect(prompt).toContain('hrms-service-account');
+    expect(prompt).toContain('invoke the saved recipe autonomously');
+    expect(prompt).toContain('postcondition');
+    expect(prompt).not.toContain('password:');
+  });
 });

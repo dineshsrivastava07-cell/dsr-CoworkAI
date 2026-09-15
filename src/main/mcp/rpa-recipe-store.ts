@@ -18,7 +18,12 @@ import * as path from 'path';
 const OPEN_COWORK_DATA_DIR =
   process.platform === 'win32'
     ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'open-cowork')
-    : path.join(os.homedir(), 'Library', 'Application Support', 'open-cowork');
+    : process.platform === 'linux'
+      ? path.join(
+          process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'),
+          'open-cowork'
+        )
+      : path.join(os.homedir(), 'Library', 'Application Support', 'open-cowork');
 
 const DEFAULT_RPA_RECIPES_DIR = path.join(OPEN_COWORK_DATA_DIR, 'rpa_recipes');
 
@@ -41,12 +46,20 @@ export interface RpaStep {
   elementDescription?: string;
 }
 
+export type RpaExecutionMode = 'ui' | 'background' | 'headless';
+
 export interface RpaRecipe {
   id: string;
   name: string;
   appName: string;
   description?: string;
   steps: RpaStep[];
+  /** How scheduled runs should acquire a desktop or non-UI execution path. */
+  executionMode?: RpaExecutionMode;
+  /** Opaque user-managed credential/profile label; secrets are never stored here. */
+  credentialProfile?: string;
+  /** Human-readable business postcondition the agent must verify after replay. */
+  successCheck?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -79,10 +92,29 @@ async function writeAll(data: RecipeFileShape): Promise<void> {
 }
 
 export async function listRecipes(): Promise<
-  Pick<RpaRecipe, 'id' | 'name' | 'appName' | 'description'>[]
+  Pick<
+    RpaRecipe,
+    | 'id'
+    | 'name'
+    | 'appName'
+    | 'description'
+    | 'executionMode'
+    | 'credentialProfile'
+    | 'successCheck'
+  >[]
 > {
   const { recipes } = await readAll();
-  return recipes.map(({ id, name, appName, description }) => ({ id, name, appName, description }));
+  return recipes.map(
+    ({ id, name, appName, description, executionMode, credentialProfile, successCheck }) => ({
+      id,
+      name,
+      appName,
+      description,
+      ...(executionMode ? { executionMode } : {}),
+      ...(credentialProfile ? { credentialProfile } : {}),
+      ...(successCheck ? { successCheck } : {}),
+    })
+  );
 }
 
 export async function getRecipeByName(name: string): Promise<RpaRecipe | undefined> {
@@ -100,6 +132,9 @@ export async function saveRecipe(
     existing.appName = recipe.appName;
     existing.description = recipe.description;
     existing.steps = recipe.steps;
+    existing.executionMode = recipe.executionMode;
+    existing.credentialProfile = recipe.credentialProfile;
+    existing.successCheck = recipe.successCheck;
     existing.updatedAt = now;
     await writeAll(data);
     return existing;

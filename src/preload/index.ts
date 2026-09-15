@@ -38,6 +38,8 @@ import type {
   InfraRcaImportInput,
   InfraRcaImportResult,
   InfraRcaConnectionResult,
+  RpaCredentialProfileInput,
+  RpaCredentialProfilePublic,
   RemoteConfig,
   GatewayConfig,
   PairedUser,
@@ -280,6 +282,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('infraRca.deleteTarget', id),
     testConnection: (id: string): Promise<InfraRcaConnectionResult> =>
       ipcRenderer.invoke('infraRca.testConnection', id),
+  },
+
+  rpaCredentials: {
+    list: (): Promise<RpaCredentialProfilePublic[]> => ipcRenderer.invoke('rpaCredentials.list'),
+    save: (profile: RpaCredentialProfileInput): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('rpaCredentials.save', profile),
+    delete: (name: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('rpaCredentials.delete', name),
   },
 
   // Skills methods
@@ -600,6 +610,11 @@ declare global {
         ) => Promise<{ success: boolean; id?: string; error?: string }>;
         deleteTarget: (id: string) => Promise<{ success: boolean; error?: string }>;
         testConnection: (id: string) => Promise<InfraRcaConnectionResult>;
+      };
+      rpaCredentials: {
+        list: () => Promise<RpaCredentialProfilePublic[]>;
+        save: (profile: RpaCredentialProfileInput) => Promise<{ success: boolean; error?: string }>;
+        delete: (name: string) => Promise<{ success: boolean; error?: string }>;
       };
       skills: {
         getAll: () => Promise<Skill[]>;

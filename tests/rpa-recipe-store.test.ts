@@ -61,24 +61,52 @@ describe('rpa-recipe-store', () => {
     await saveRecipe({
       name: 'weekly_report',
       appName: 'ERP',
+      executionMode: 'background',
+      credentialProfile: 'erp-service-account',
+      successCheck: 'Re-open export and compare row count',
       steps: [{ tool: 'click', args: { x: 1, y: 2 }, elementDescription: 'the Generate button' }],
     });
 
     const fetched = await getRecipeByName('weekly_report');
+    expect(fetched).toMatchObject({
+      executionMode: 'background',
+      credentialProfile: 'erp-service-account',
+      successCheck: 'Re-open export and compare row count',
+    });
     expect(fetched?.steps).toEqual([
       { tool: 'click', args: { x: 1, y: 2 }, elementDescription: 'the Generate button' },
     ]);
   });
 
   it('overwrites an existing recipe with the same name instead of duplicating it', async () => {
-    await saveRecipe({ name: 'dup', appName: 'App', steps: [] });
-    await saveRecipe({ name: 'dup', appName: 'App', steps: [{ tool: 'wait', args: { ms: 500 } }] });
+    await saveRecipe({
+      name: 'dup',
+      appName: 'App',
+      steps: [],
+      executionMode: 'ui',
+      credentialProfile: 'old-profile',
+      successCheck: 'old check',
+    });
+    await saveRecipe({
+      name: 'dup',
+      appName: 'App 2',
+      steps: [{ tool: 'wait', args: { ms: 500 } }],
+      executionMode: 'background',
+      credentialProfile: 'new-profile',
+      successCheck: 'new check',
+    });
 
     const listed = await listRecipes();
     expect(listed).toHaveLength(1);
 
     const fetched = await getRecipeByName('dup');
     expect(fetched?.steps).toHaveLength(1);
+    expect(fetched).toMatchObject({
+      appName: 'App 2',
+      executionMode: 'background',
+      credentialProfile: 'new-profile',
+      successCheck: 'new check',
+    });
   });
 
   it('deletes a recipe by name', async () => {

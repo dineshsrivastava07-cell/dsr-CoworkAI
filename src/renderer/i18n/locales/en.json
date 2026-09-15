@@ -495,14 +495,14 @@
   },
   "rpa": {
     "title": "RPA / Desktop automation",
-    "description": "Control desktop apps, capture screenshots, and record or replay reusable workflows with the bundled GUI_Operate connector.",
+    "description": "Control desktop, web and ERP workflows with screenshot-aware recording, secure credential profiles, replay evidence and autonomous scheduled or change-triggered runs.",
     "enable": "Enable RPA",
     "disable": "Disable RPA",
     "disabled": "Disabled",
     "connected": "Connected · {{count}} tools available",
     "notConnected": "Enabled · not connected",
-    "permissions": "On macOS, allow the app in System Settings → Privacy & Security → Accessibility and Screen Recording when prompted. Desktop automation supports macOS and Windows. Vision-based actions also require a configured vision-capable provider.",
-    "tryIt": "After connecting, start a chat and ask: List my saved RPA recipes. To create a workflow, ask the agent to record the steps as it performs them. Tool permissions and irreversible-action confirmations still apply."
+    "permissions": "Desktop automation supports macOS, Windows and Linux. On macOS, allow Accessibility and Screen Recording. On Linux, use an unlocked X11/XWayland session with xdotool, xrandr and maim/scrot/gnome-screenshot. Vision actions also require a configured vision-capable provider.",
+    "tryIt": "After connecting, configure an encrypted credential profile, ask the agent to record and verify a recipe, then create a daily or HTTP-triggered autonomous job. Enable Autonomous Mode for unattended safe tools; unexpected dialogs, missing credentials and irreversible actions stop for operator review."
   },
   "mcp": {
     "noConnectors": "No connectors configured",

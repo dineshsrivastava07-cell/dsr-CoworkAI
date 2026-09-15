@@ -435,6 +435,17 @@ export class MCPManager {
     }
   }
 
+  /** Inject decrypted profiles into the initial GUI child environment; the child loads and clears them before spawning helpers. */
+  private async getRpaCredentialEnvOverrides(): Promise<Record<string, string>> {
+    try {
+      const { rpaCredentialStore } = await import('./rpa-credential-store');
+      return { RPA_CREDENTIAL_PROFILES_JSON: JSON.stringify(rpaCredentialStore.getForBroker()) };
+    } catch (error) {
+      logWarn('[MCPManager] Could not read RPA credential profiles:', error);
+      return {};
+    }
+  }
+
   /**
    * Get enhanced environment with proper PATH for packaged app
    * This is critical for packaged apps where process.env is very limited
@@ -994,6 +1005,10 @@ export class MCPManager {
       // model's context.
       if (config.name === 'Infra_RCA' || config.name === 'Infra RCA') {
         Object.assign(config.env ?? (config.env = {}), await this.getInfraRcaEnvOverrides());
+      }
+
+      if (config.name === 'GUI_Operate' || config.name === 'GUI Operate') {
+        Object.assign(config.env ?? (config.env = {}), await this.getRpaCredentialEnvOverrides());
       }
 
       // Get environment variables before resolving npx so Windows can prefer a
@@ -1923,6 +1938,15 @@ export class MCPManager {
     } finally {
       this.reconnectingServers.delete(serverId);
     }
+  }
+
+  /** Reconnect a named built-in server so transient credential/profile env is refreshed. */
+  async restartServerByName(name: string): Promise<boolean> {
+    const entry = [...this.serverConfigs.entries()].find(
+      ([, config]) =>
+        config.name === name || (name === 'GUI_Operate' && config.name === 'GUI Operate')
+    );
+    return entry ? this.reconnectServer(entry[0]) : false;
   }
 
   /**

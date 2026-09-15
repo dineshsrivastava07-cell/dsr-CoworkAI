@@ -135,6 +135,20 @@ export interface InfraRcaImportInput {
   duplicates: 'skip' | 'update';
 }
 
+export interface RpaCredentialProfilePublic {
+  name: string;
+  appName?: string;
+  username: string;
+  updatedAt: number;
+}
+
+export interface RpaCredentialProfileInput {
+  name: string;
+  appName?: string;
+  username: string;
+  password: string;
+}
+
 export interface InfraRcaImportResult {
   success: boolean;
   added: number;

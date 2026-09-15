@@ -1,7 +1,7 @@
 /**
  * GUI Operate MCP Server
  *
- * This MCP server provides GUI automation capabilities for macOS and Windows:
+ * This MCP server provides GUI automation capabilities for macOS, Windows, and Linux:
  * - Click (single click, double click, right click)
  * - Type text (keyboard input)
  * - Scroll (mouse wheel scroll)
@@ -16,6 +16,7 @@
  * Platform-specific tools:
  * - macOS: Uses cliclick (brew install cliclick) and AppleScript
  * - Windows: Uses PowerShell with .NET System.Windows.Forms
+ * - Linux: Uses xdotool/xrandr and maim, scrot, or gnome-screenshot
  */
 
 // Bootstrap logging - log as early as possible
@@ -39,13 +40,28 @@ import {
   saveRecipe,
   fillParams,
   type RpaStep,
+  type RpaExecutionMode,
 } from './rpa-recipe-store';
+import { fillCredentialParams, redactCredentialSecrets } from './rpa-credential-runtime';
+import {
+  getLinuxRuntimeStatus,
+  linuxGetDisplayConfiguration,
+  linuxGetForegroundApplicationName,
+  linuxGetMousePosition,
+  linuxMoveMouse,
+  linuxPerformClick,
+  linuxPerformDrag,
+  linuxPerformKeyPress,
+  linuxPerformScroll,
+  linuxPerformType,
+  linuxTakeScreenshot,
+} from './linux-desktop-driver';
 writeMCPLog('Imported Node.js built-in modules', 'Bootstrap');
 
 const execFileAsync = promisify(execFile);
 
 // Detect platform
-const PLATFORM = os.platform(); // 'darwin' for macOS, 'win32' for Windows
+const PLATFORM = os.platform(); // 'darwin' for macOS, 'win32' for Windows, 'linux' for Linux
 writeMCPLog(`Platform detected: ${PLATFORM}`, 'Bootstrap');
 
 // Get Open Cowork data directory for persistent storage
@@ -55,7 +71,12 @@ writeMCPLog(`Platform detected: ${PLATFORM}`, 'Bootstrap');
 const OPEN_COWORK_DATA_DIR =
   PLATFORM === 'win32'
     ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'open-cowork')
-    : path.join(os.homedir(), 'Library', 'Application Support', 'open-cowork');
+    : PLATFORM === 'linux'
+      ? path.join(
+          process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'),
+          'open-cowork'
+        )
+      : path.join(os.homedir(), 'Library', 'Application Support', 'open-cowork');
 
 // Directory for storing GUI operate files (screenshots, etc.)
 const GUI_OPERATE_DIR = path.join(OPEN_COWORK_DATA_DIR, 'gui_operate');
@@ -141,6 +162,9 @@ interface InProgressRecording {
   appName: string;
   description?: string;
   steps: RpaStep[];
+  executionMode?: RpaExecutionMode;
+  credentialProfile?: string;
+  successCheck?: string;
 }
 let currentRecording: InProgressRecording | null = null;
 
@@ -173,9 +197,12 @@ function getGuiDenylistApps(): string[] {
   return [...DEFAULT_GUI_DENYLIST_APPS, ...extra];
 }
 
-/** Returns the matched denylist term if the frontmost app is deny-listed, else null. macOS only for now. */
+/** Returns the matched denylist term if the foreground app/window is deny-listed, else null. */
 async function checkForegroundAppDenylist(): Promise<string | null> {
-  const frontmost = await getFrontmostMacApplicationName();
+  const frontmost =
+    PLATFORM === 'linux'
+      ? await linuxGetForegroundApplicationName()
+      : await getFrontmostMacApplicationName();
   if (!frontmost) return null;
   const lowerName = frontmost.toLowerCase();
   const denylist = getGuiDenylistApps();
@@ -894,6 +921,35 @@ async function pathExists(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function getDesktopRuntimeStatus(): Promise<Record<string, unknown>> {
+  if (PLATFORM === 'linux') return { ...(await getLinuxRuntimeStatus()) };
+  if (PLATFORM === 'win32') {
+    return {
+      platform: 'win32',
+      ready: true,
+      inputBackend: 'PowerShell/.NET SendInput',
+      screenshotBackend: 'PowerShell/.NET Graphics',
+      limitations: [
+        'The signed-in desktop must remain unlocked.',
+        'Windows secure desktop, UAC consent, and higher-integrity windows may reject automation.',
+      ],
+    };
+  }
+  if (PLATFORM === 'darwin') {
+    return {
+      platform: 'darwin',
+      ready: await pathExists('/usr/sbin/screencapture'),
+      inputBackend: (await resolveCliclickPath()) || 'Quartz fallback',
+      screenshotBackend: '/usr/sbin/screencapture',
+      limitations: [
+        'Accessibility and Screen Recording permission must be granted to the running app/helper.',
+        'The signed-in desktop must remain unlocked.',
+      ],
+    };
+  }
+  return { platform: PLATFORM, ready: false, missing: ['supported desktop driver'] };
 }
 
 function getResourcesDirCandidates(): string[] {
@@ -2797,6 +2853,7 @@ Write-Output "SUCCESS"
  * Get display configuration using platform-specific methods
  * - macOS: AppleScript/system_profiler
  * - Windows: PowerShell with System.Windows.Forms
+ * - Linux: xrandr in the signed-in X11/XWayland session
  * Returns information about all connected displays
  */
 async function getDisplayConfiguration(): Promise<DisplayConfiguration> {
@@ -2816,6 +2873,19 @@ async function getDisplayConfiguration(): Promise<DisplayConfiguration> {
     } catch (error: unknown) {
       throw new Error(
         `Failed to get display information on Windows: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  if (PLATFORM === 'linux') {
+    try {
+      const config = await linuxGetDisplayConfiguration();
+      displayConfigCache = config;
+      displayConfigCacheTime = now;
+      return config;
+    } catch (error: unknown) {
+      throw new Error(
+        `Failed to get display information on Linux: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
@@ -3371,6 +3441,12 @@ async function performClick(
     return `Performed ${clickType} click at (${localX}, ${localY}) on display ${displayIndex} (global: ${globalX}, ${globalY})`;
   }
 
+  if (PLATFORM === 'linux') {
+    await linuxPerformClick(globalX, globalY, clickType, modifiers);
+    await addClickToHistory(localX, localY, displayIndex, clickType);
+    return `Performed ${clickType} click at (${localX}, ${localY}) on display ${displayIndex} (global: ${globalX}, ${globalY})`;
+  }
+
   // macOS implementation using cliclick
   const normalizedModifiers = normalizeModifierKeys(modifiers);
   const cliclickPath = await resolveCliclickPath();
@@ -3437,6 +3513,12 @@ async function performType(
       'Type Operation'
     );
     await windowsPerformType(text, pressEnter);
+    return `Typed: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"${pressEnter ? ' and pressed Enter' : ''}`;
+  }
+
+  if (PLATFORM === 'linux') {
+    writeMCPLog(`[performType] Linux: Typing text. text length: ${text.length}`, 'Type Operation');
+    await linuxPerformType(text, pressEnter);
     return `Typed: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"${pressEnter ? ' and pressed Enter' : ''}`;
   }
 
@@ -3521,6 +3603,12 @@ async function performKeyPress(key: string, modifiers: string[] = []): Promise<s
   // Windows implementation
   if (PLATFORM === 'win32') {
     await windowsPerformKeyPress(key, modifiers);
+    const modifierStr = modifiers.length > 0 ? `${modifiers.join('+')}+` : '';
+    return `Pressed: ${modifierStr}${key}`;
+  }
+
+  if (PLATFORM === 'linux') {
+    await linuxPerformKeyPress(key, modifiers);
     const modifierStr = modifiers.length > 0 ? `${modifiers.join('+')}+` : '';
     return `Pressed: ${modifierStr}${key}`;
   }
@@ -3767,6 +3855,11 @@ async function performScroll(
     return `Scrolled ${direction} by ${amount} at (${x}, ${y}) on display ${displayIndex}`;
   }
 
+  if (PLATFORM === 'linux') {
+    await linuxPerformScroll(globalX, globalY, direction, amount);
+    return `Scrolled ${direction} by ${amount} at (${x}, ${y}) on display ${displayIndex}`;
+  }
+
   // macOS implementation
   // First move to the position
   // Use formatCliclickCoords to handle negative coordinates (displays to left/above main)
@@ -3847,6 +3940,16 @@ async function performDrag(
     return `Dragged from (${fromX}, ${fromY}) to (${toX}, ${toY}) on display ${displayIndex}`;
   }
 
+  if (PLATFORM === 'linux') {
+    await linuxPerformDrag(
+      fromCoords.globalX,
+      fromCoords.globalY,
+      toCoords.globalX,
+      toCoords.globalY
+    );
+    return `Dragged from (${fromX}, ${fromY}) to (${toX}, ${toY}) on display ${displayIndex}`;
+  }
+
   // macOS implementation
   // cliclick drag command: dd: (drag down/start) then du: (drag up/end)
   // Use formatCliclickCoords to handle negative coordinates (displays to left/above main)
@@ -3902,6 +4005,45 @@ async function takeScreenshot(
     await windowsTakeScreenshot(finalPath, displayIndex, globalRegion);
 
     // Verify the file was created
+    try {
+      await fs.access(finalPath);
+      const stats = await fs.stat(finalPath);
+      return JSON.stringify({
+        success: true,
+        path: finalPath,
+        size: stats.size,
+        displayIndex: displayIndex ?? 'all',
+        timestamp: new Date().toISOString(),
+      });
+    } catch {
+      throw new Error(`Screenshot file was not created at ${finalPath}`);
+    }
+  }
+
+  if (PLATFORM === 'linux') {
+    let globalRegion: { x: number; y: number; width: number; height: number } | undefined;
+    if (displayIndex !== undefined) {
+      const config = await getDisplayConfiguration();
+      const display = config.displays.find((item) => item.index === displayIndex);
+      if (!display) throw new Error(`Display index ${displayIndex} not found.`);
+      globalRegion = region
+        ? {
+            x: display.originX + region.x,
+            y: display.originY + region.y,
+            width: region.width,
+            height: region.height,
+          }
+        : {
+            x: display.originX,
+            y: display.originY,
+            width: display.width,
+            height: display.height,
+          };
+    } else if (region) {
+      globalRegion = region;
+    }
+
+    await linuxTakeScreenshot(finalPath, globalRegion);
     try {
       await fs.access(finalPath);
       const stats = await fs.stat(finalPath);
@@ -4158,6 +4300,10 @@ async function getMousePosition(): Promise<{ x: number; y: number; displayIndex:
     const pos = await windowsGetMousePosition();
     globalX = pos.globalX;
     globalY = pos.globalY;
+  } else if (PLATFORM === 'linux') {
+    const pos = await linuxGetMousePosition();
+    globalX = pos.globalX;
+    globalY = pos.globalY;
   } else {
     // macOS implementation
     const result = await executeCliclick('p');
@@ -4208,6 +4354,11 @@ async function moveMouse(x: number, y: number, displayIndex: number = 0): Promis
   // Windows implementation
   if (PLATFORM === 'win32') {
     await windowsMoveMouse(globalX, globalY);
+    return `Moved mouse to (${x}, ${y}) on display ${displayIndex}`;
+  }
+
+  if (PLATFORM === 'linux') {
+    await linuxMoveMouse(globalX, globalY);
     return `Moved mouse to (${x}, ${y}) on display ${displayIndex}`;
   }
 
@@ -5419,8 +5570,8 @@ async function planGUIActions(
   }>;
   summary?: string;
 }> {
-  // Supported on both macOS and Windows
-  if (PLATFORM !== 'darwin' && PLATFORM !== 'win32') {
+  // Supported on macOS, Windows, and Linux graphical sessions.
+  if (PLATFORM !== 'darwin' && PLATFORM !== 'win32' && PLATFORM !== 'linux') {
     throw new Error(`GUI action planning is not supported on platform: ${PLATFORM}`);
   }
 
@@ -5567,8 +5718,8 @@ async function locateGUIElement(
   reasoning?: string;
   boundingBox?: { left: number; top: number; right: number; bottom: number };
 }> {
-  // Supported on both macOS and Windows
-  if (PLATFORM !== 'darwin' && PLATFORM !== 'win32') {
+  // Supported on macOS, Windows, and Linux graphical sessions.
+  if (PLATFORM !== 'darwin' && PLATFORM !== 'win32' && PLATFORM !== 'linux') {
     throw new Error(`Element location is not supported on platform: ${PLATFORM}`);
   }
 
@@ -5842,8 +5993,8 @@ async function performVisionBasedInteraction(
   taskDescription: string,
   displayIndex?: number
 ): Promise<string> {
-  // Supported on both macOS and Windows
-  if (PLATFORM !== 'darwin' && PLATFORM !== 'win32') {
+  // Supported on macOS, Windows, and Linux graphical sessions.
+  if (PLATFORM !== 'darwin' && PLATFORM !== 'win32' && PLATFORM !== 'linux') {
     throw new Error(`Vision-based GUI interaction is not supported on platform: ${PLATFORM}`);
   }
 
@@ -5952,8 +6103,8 @@ async function performVisionBasedInteraction(
  * Verify GUI state using vision
  */
 async function verifyGUIState(question: string, displayIndex?: number): Promise<string> {
-  // Supported on both macOS and Windows
-  if (PLATFORM !== 'darwin' && PLATFORM !== 'win32') {
+  // Supported on macOS, Windows, and Linux graphical sessions.
+  if (PLATFORM !== 'darwin' && PLATFORM !== 'win32' && PLATFORM !== 'linux') {
     throw new Error(`GUI verification is not supported on platform: ${PLATFORM}`);
   }
 
@@ -6141,8 +6292,8 @@ function updateScreenshotCache(entry: ScreenshotCacheEntry): void {
  * Extract information from GUI screenshot using vision
  */
 async function extractGUIInfo(extractionPrompt: string, displayIndex?: number): Promise<string> {
-  // Supported on both macOS and Windows
-  if (PLATFORM !== 'darwin' && PLATFORM !== 'win32') {
+  // Supported on macOS, Windows, and Linux graphical sessions.
+  if (PLATFORM !== 'darwin' && PLATFORM !== 'win32' && PLATFORM !== 'linux') {
     throw new Error(`GUI extraction is not supported on platform: ${PLATFORM}`);
   }
 
@@ -6206,6 +6357,16 @@ function createMcpServer(): Server {
   server.setRequestHandler('tools/list', async (): Promise<ListToolsResult> => {
     return {
       tools: [
+        {
+          name: 'get_runtime_status',
+          description:
+            'Preflight the desktop automation runtime. Reports the operating system, available input/display/screenshot backends, session limitations, and missing prerequisites without exposing credentials.',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+            required: [],
+          },
+        },
         {
           name: 'get_displays',
           description:
@@ -6663,6 +6824,22 @@ function createMcpServer(): Server {
                 type: 'string',
                 description: 'The application this recipe drives (matches init_app naming).',
               },
+              execution_mode: {
+                type: 'string',
+                enum: ['ui', 'background', 'headless'],
+                description:
+                  'Execution profile for replay. Headless is valid only for non-UI workflows.',
+              },
+              credential_profile: {
+                type: 'string',
+                description:
+                  'User-managed credential/profile label only; never a password or token.',
+              },
+              success_check: {
+                type: 'string',
+                description:
+                  'Business postcondition to verify after replay (record IDs, totals, status or output).',
+              },
             },
             required: ['recipe_name', 'app_name'],
           },
@@ -6701,6 +6878,15 @@ function createMcpServer(): Server {
                 type: 'string',
                 description: 'Optional human-readable summary of what this recipe does.',
               },
+              execution_mode: { type: 'string', enum: ['ui', 'background', 'headless'] },
+              credential_profile: {
+                type: 'string',
+                description: 'Opaque user-managed profile label.',
+              },
+              success_check: {
+                type: 'string',
+                description: 'Business postcondition required for autonomous runs.',
+              },
             },
             required: [],
           },
@@ -6723,6 +6909,22 @@ function createMcpServer(): Server {
                 description:
                   'Optional key-value map to substitute {{key}} placeholders in recorded step arguments.',
               },
+              execution_mode: {
+                type: 'string',
+                enum: ['ui', 'background', 'headless'],
+                description:
+                  'Optional override. Headless rejects GUI-only steps instead of pretending they ran.',
+              },
+              credential_profile: {
+                type: 'string',
+                description:
+                  'Optional credential profile override; resolved inside the connector and never returned.',
+              },
+              capture_evidence: {
+                type: 'boolean',
+                description:
+                  'Capture before/after screenshots for unattended audit evidence (default true).',
+              },
             },
             required: ['recipe_name'],
           },
@@ -6742,12 +6944,20 @@ function createMcpServer(): Server {
     const { name, arguments: args } = request.params;
 
     try {
-      writeMCPLog(`[CallTool] name=${name}, args=${JSON.stringify(args ?? {})}`, 'Tool Call');
+      writeMCPLog(
+        `[CallTool] name=${name}, args=${JSON.stringify(redactCredentialSecrets(args ?? {}))}`,
+        'Tool Call'
+      );
 
       let result: string;
       let resultImage: { data: string; mimeType: string } | undefined;
 
       switch (name) {
+        case 'get_runtime_status': {
+          result = JSON.stringify(await getDesktopRuntimeStatus(), null, 2);
+          break;
+        }
+
         case 'get_displays': {
           const config = await getDisplayConfiguration();
           result = JSON.stringify(config, null, 2);
@@ -7112,8 +7322,28 @@ function createMcpServer(): Server {
         }
 
         case 'start_recipe_recording': {
-          const { recipe_name, app_name } = args as { recipe_name: string; app_name: string };
-          currentRecording = { name: recipe_name, appName: app_name, steps: [] };
+          const { recipe_name, app_name, execution_mode, credential_profile, success_check } =
+            args as {
+              recipe_name: string;
+              app_name: string;
+              execution_mode?: RpaExecutionMode;
+              credential_profile?: string;
+              success_check?: string;
+            };
+          if (!recipe_name?.trim() || !app_name?.trim())
+            throw new Error('recipe_name and app_name are required.');
+          if (execution_mode === 'headless')
+            throw new Error(
+              'Headless recording is unavailable for GUI steps; record in UI mode and use browser/API tools for headless workflows.'
+            );
+          currentRecording = {
+            name: recipe_name.trim(),
+            appName: app_name.trim(),
+            steps: [],
+            executionMode: execution_mode || 'ui',
+            credentialProfile: credential_profile?.trim() || undefined,
+            successCheck: success_check?.trim() || undefined,
+          };
           result = JSON.stringify({
             success: true,
             message: `Recording started for recipe "${recipe_name}". Perform the actions, calling record_recipe_step after each one, then save_recipe when done.`,
@@ -7150,12 +7380,20 @@ function createMcpServer(): Server {
           if (!currentRecording) {
             throw new Error('No recipe recording in progress. Call start_recipe_recording first.');
           }
-          const { description } = args as { description?: string };
+          const { description, execution_mode, credential_profile, success_check } = args as {
+            description?: string;
+            execution_mode?: RpaExecutionMode;
+            credential_profile?: string;
+            success_check?: string;
+          };
           const saved = await saveRecipe({
             name: currentRecording.name,
             appName: currentRecording.appName,
             description,
             steps: currentRecording.steps,
+            executionMode: execution_mode || currentRecording.executionMode || 'ui',
+            credentialProfile: credential_profile?.trim() || currentRecording.credentialProfile,
+            successCheck: success_check?.trim() || currentRecording.successCheck,
           });
           currentRecording = null;
           result = JSON.stringify({
@@ -7172,9 +7410,18 @@ function createMcpServer(): Server {
         }
 
         case 'run_recipe': {
-          const { recipe_name, params } = args as {
+          const {
+            recipe_name,
+            params,
+            execution_mode,
+            credential_profile,
+            capture_evidence = true,
+          } = args as {
             recipe_name: string;
             params?: Record<string, string>;
+            execution_mode?: RpaExecutionMode;
+            credential_profile?: string;
+            capture_evidence?: boolean;
           };
           const recipe = await getRecipeByName(recipe_name);
           if (!recipe) {
@@ -7182,10 +7429,31 @@ function createMcpServer(): Server {
               `No recipe named "${recipe_name}". Call list_recipes to see what's available.`
             );
           }
+          const mode = execution_mode || recipe.executionMode || 'ui';
+          const profileName = credential_profile?.trim() || recipe.credentialProfile;
+          if (!['ui', 'background', 'headless'].includes(mode)) {
+            throw new Error('execution_mode must be ui, background or headless.');
+          }
+          if (mode === 'headless') {
+            throw new Error(
+              'This recipe contains GUI steps and cannot run headless. Use browser/API tools for a headless workflow, or select UI/background with an available desktop.'
+            );
+          }
           const stepResults: string[] = [];
+          const evidence: string[] = [];
+          if (capture_evidence) {
+            try {
+              evidence.push(await takeScreenshot());
+            } catch (error) {
+              throw new Error(
+                `Recipe pre-run screenshot failed: ${error instanceof Error ? error.message : String(error)}`
+              );
+            }
+          }
           for (let i = 0; i < recipe.steps.length; i++) {
             const step = recipe.steps[i];
             let stepArgs = fillParams(step.args, params);
+            stepArgs = fillCredentialParams(stepArgs, profileName);
 
             // Re-resolve click targets semantically instead of trusting stale
             // recorded coordinates — the actual reliability fix for
@@ -7218,8 +7486,30 @@ function createMcpServer(): Server {
               );
             }
           }
+          if (capture_evidence) {
+            try {
+              evidence.push(await takeScreenshot());
+            } catch (error) {
+              throw new Error(
+                `Recipe post-run screenshot failed: ${error instanceof Error ? error.message : String(error)}`
+              );
+            }
+          }
           result = JSON.stringify(
-            { success: true, recipe: recipe_name, steps: stepResults },
+            {
+              success: true,
+              recipe: recipe_name,
+              executionMode: mode,
+              credentialProfile: recipe.credentialProfile,
+              successCheck:
+                recipe.successCheck ||
+                'No business postcondition was recorded; result is unverified.',
+              postconditionStatus: recipe.successCheck
+                ? 'requires_agent_verification'
+                : 'unverified',
+              evidence,
+              steps: stepResults,
+            },
             null,
             2
           );
