@@ -14,7 +14,7 @@ const isElectron = typeof window !== 'undefined' && window.electronAPI !== undef
 
 const PROTOCOL_LABELS: Record<InfraRcaProtocol, string> = {
   ssh: 'SSH (Linux/Unix)',
-  winrm: 'WinRM (Windows, best-effort)',
+  winrm: 'WinRM (Windows, advanced)',
   snmp: 'SNMP (network gear/printers/UPS)',
   db: 'Database (Postgres/MySQL)',
 };
@@ -29,6 +29,9 @@ const emptyForm: InfraRcaTargetInput = {
   dbEngine: 'postgres',
   dbName: '',
   community: '',
+  winrmTransport: 'http',
+  winrmAuth: 'auto',
+  winrmRejectUnauthorized: true,
 };
 
 export function SettingsInfraRCA({
@@ -230,6 +233,9 @@ export function SettingsInfraRCA({
                     <div className="text-xs text-text-muted">
                       {PROTOCOL_LABELS[target.protocol]} · {target.host}{' '}
                       {target.group ? `· ${target.group}` : ''}
+                      {target.protocol === 'winrm'
+                        ? ` · ${(target.winrmAuth || 'auto').toUpperCase()} / ${(target.winrmTransport || 'http').toUpperCase()}`
+                        : ''}
                     </div>
                     {testResult && (
                       <InfraConnectionResult result={testResult} protocol={target.protocol} />
@@ -325,7 +331,12 @@ export function SettingsInfraRCA({
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-text-primary mb-1">
-                      Password {form.protocol === 'ssh' ? '(or leave blank if using a key)' : ''}
+                      Password{' '}
+                      {form.protocol === 'ssh'
+                        ? '(or leave blank if using a key)'
+                        : form.protocol === 'winrm' && form.winrmAuth === 'kerberos'
+                          ? '(not used; current Windows ticket is used)'
+                          : ''}
                     </label>
                     <input
                       type="password"
@@ -334,6 +345,60 @@ export function SettingsInfraRCA({
                       className="w-full px-3 py-2 rounded-lg bg-background border border-border text-text-primary text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent/30"
                     />
                   </div>
+                  {form.protocol === 'winrm' && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="text-xs font-medium text-text-primary">
+                        Authentication
+                        <select
+                          value={form.winrmAuth || 'auto'}
+                          onChange={(e) =>
+                            setForm({
+                              ...form,
+                              winrmAuth: e.target.value as InfraRcaTargetInput['winrmAuth'],
+                            })
+                          }
+                          className="mt-1 w-full px-3 py-2 rounded-lg bg-background border border-border text-text-primary text-sm"
+                        >
+                          <option value="auto">Auto (local Basic / domain NTLM)</option>
+                          <option value="basic">Basic</option>
+                          <option value="ntlm">NTLM</option>
+                          <option value="kerberos">Kerberos (Windows domain ticket)</option>
+                        </select>
+                      </label>
+                      <label className="text-xs font-medium text-text-primary">
+                        Transport
+                        <select
+                          value={form.winrmTransport || 'http'}
+                          onChange={(e) =>
+                            setForm({
+                              ...form,
+                              winrmTransport: e.target
+                                .value as InfraRcaTargetInput['winrmTransport'],
+                            })
+                          }
+                          className="mt-1 w-full px-3 py-2 rounded-lg bg-background border border-border text-text-primary text-sm"
+                        >
+                          <option value="http">HTTP · 5985</option>
+                          <option value="https">HTTPS · 5986</option>
+                        </select>
+                      </label>
+                      <label className="col-span-2 flex items-center gap-2 text-xs text-text-secondary">
+                        <input
+                          type="checkbox"
+                          checked={form.winrmRejectUnauthorized !== false}
+                          onChange={(e) =>
+                            setForm({ ...form, winrmRejectUnauthorized: e.target.checked })
+                          }
+                        />
+                        Verify the HTTPS certificate (recommended; disable only for an approved test
+                        certificate)
+                      </label>
+                      <p className="col-span-2 text-xs text-text-muted">
+                        NTLM requires DOMAIN\\user or user@domain. Kerberos uses the logged-in
+                        Windows domain ticket and is unavailable from macOS/Linux.
+                      </p>
+                    </div>
+                  )}
                 </>
               )}
               {form.protocol === 'db' && (

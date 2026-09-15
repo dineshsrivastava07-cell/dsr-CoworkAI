@@ -1,6 +1,6 @@
-name,protocol,host,port,username,group,dbEngine,dbName
-qa-linux-001,ssh,192.0.2.11,22,svc_diagnostics,QA-Linux,,
-qa-windows-001,winrm,192.0.2.21,5985,svc_diagnostics,QA-Windows,,
-qa-switch-001,snmp,192.0.2.31,161,,QA-Network,,
-qa-postgres-001,db,192.0.2.41,5432,svc_readonly,QA-Databases,postgres,operations_test
-qa-mysql-001,db,192.0.2.42,3306,svc_readonly,QA-Databases,mysql,operations_test
+name,protocol,host,port,username,group,dbEngine,dbName,winrmTransport,winrmAuth,winrmRejectUnauthorized
+qa-linux-001,ssh,192.0.2.11,22,svc_diagnostics,QA-Linux,,,,,
+qa-windows-001,winrm,192.0.2.21,5985,DOMAIN\svc_diagnostics,QA-Windows,,,http,ntlm,true
+qa-switch-001,snmp,192.0.2.31,161,,QA-Network,,,,,
+qa-postgres-001,db,192.0.2.41,5432,svc_readonly,QA-Databases,postgres,operations_test,,,
+qa-mysql-001,db,192.0.2.42,3306,svc_readonly,QA-Databases,mysql,operations_test,,,

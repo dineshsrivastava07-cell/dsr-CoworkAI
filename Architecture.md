@@ -322,9 +322,9 @@ Unattended/scheduled sessions previously stalled on the same 60-second permissio
 
 ## Infra RCA — Remote Infrastructure Diagnostics
 
-Settings IPC and the MCP `infra_ping_check` tool share `checkInfraConnection`. It performs a bounded TCP connection for SSH/WinRM/databases or a read-only SNMP request for network devices. TCP success is explicitly not authentication evidence. Failed results contain a known error category, tested port and corrective checks; WinRM results include local read-only PowerShell checks and transport/authentication limitations. The MCP tool marks failed readiness with `isError` so downstream runs cannot treat it as a successful check.
+Settings IPC and the MCP `infra_ping_check` tool share `checkInfraConnection`. It performs a bounded TCP connection for SSH/WinRM/databases or a read-only SNMP request for network devices. TCP success is explicitly not authentication evidence. Failed results contain a known error category, tested port and corrective checks; WinRM results include local read-only PowerShell checks and the configured transport/authentication mode. The MCP tool marks failed readiness with `isError` so downstream runs cannot treat it as a successful check.
 
-`Infra_RCA` is a bundled MCP server that diagnoses remote systems — Linux/Unix servers (SSH), Windows servers (WinRM/PowerShell, best-effort), network gear/printers/UPS (SNMP via standard IETF MIBs), and Postgres/MySQL (direct connection) — and proposes fixes. It is implicitly enabled when no saved configuration exists; an explicitly disabled configuration takes precedence. Settings displays this effective configuration and provides an Enable/Disable control. Credentials for each named target live in a dedicated encrypted store and are resolved by the MCP server child process on demand via a loopback broker in the main process — they never appear in the model's context.
+`Infra_RCA` is a bundled MCP server that diagnoses remote systems — Linux/Unix servers (SSH), Windows servers (WinRM/PowerShell with Basic/NTLM over HTTP/HTTPS and native Windows-ticket Kerberos), network gear/printers/UPS (SNMP via standard IETF MIBs), and Postgres/MySQL (direct connection) — and proposes fixes. The expert surface includes `infra_capabilities` and bounded `infra_expert_assess` quick/full runs across OS, service, process, CPU, disk/storage, memory, network, hardware, virtualization, security, printer, power and database health where the protocol supports it. It is implicitly enabled when no saved configuration exists; an explicitly disabled configuration takes precedence. Settings displays this effective configuration and provides an Enable/Disable control. Credentials for each named target live in a dedicated encrypted store and are resolved by the MCP server child process on demand via a loopback broker in the main process — they never appear in the model's context.
 
 Bulk import accepts CSV or a JSON array, validates up to 10,000 records with shared batch defaults, and plans case-insensitive name matches. Preview returns only public fields and row errors. Commit revalidates against current storage and writes the entire resulting array once; any invalid record prevents a write. Existing IDs and omitted credentials survive updates, and changing an existing target's host/protocol requires a new target name. The UI pages 50 targets at a time; `infra_list_targets` returns a filtered page with a continuation offset. This is inventory onboarding, not a distributed monitoring or RPA-worker service.
 
@@ -537,7 +537,7 @@ src/
 │   │   ├── google-workspace-server.ts  Gmail/Drive/Calendar
 │   │   ├── ocr-tools-server.ts     Tesseract OCR
 │   │   ├── weather-tools-server.ts Open-Meteo weather
-│   │   ├── infra-rca-server.ts     Remote diagnostics (6 tools, incl.
+│   │   ├── infra-rca-server.ts     Remote diagnostics (8 tools, incl.
 │   │   │                           read-only infra_query_db); propose/
 │   │   │                           execute-fix split with auto post-fix
 │   │   │                           verification, never auto-executes

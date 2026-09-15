@@ -164,16 +164,15 @@ export async function diagnoseSsh(
   let rawOutput = '';
 
   switch (category) {
-    case 'disk_health': {
-      const { 'df -h': dfRes } = await runMany(target, ['df -h']);
-      metrics = parseDiskUsage(dfRes.stdout);
-      rawOutput = dfRes.stdout;
-      break;
-    }
-    case 'ram_health': {
-      const { 'free -m': freeRes } = await runMany(target, ['free -m']);
-      metrics = parseMemUsage(freeRes.stdout);
-      rawOutput = freeRes.stdout;
+    case 'service_health': {
+      const results = await runMany(target, ['uptime', 'systemctl --failed --no-legend']);
+      metrics = [
+        { name: 'Uptime', value: results.uptime.stdout.trim() || 'unknown', status: 'ok' },
+        ...parseFailedServices(results['systemctl --failed --no-legend'].stdout),
+      ];
+      rawOutput = Object.values(results)
+        .map((r) => r.stdout)
+        .join('\n---\n');
       break;
     }
     case 'os_health': {
@@ -185,6 +184,58 @@ export async function diagnoseSsh(
       rawOutput = Object.values(results)
         .map((r) => r.stdout)
         .join('\n---\n');
+      break;
+    }
+    case 'process_health': {
+      const command = 'ps -eo pid,comm,%cpu,%mem --sort=-%cpu | head -11';
+      const result = await runMany(target, [command]);
+      const lines = result[command].stdout.trim().split('\n').filter(Boolean);
+      metrics = [
+        { name: 'Process sample rows', value: Math.max(0, lines.length - 1), status: 'ok' },
+      ];
+      rawOutput = result[command].stdout;
+      break;
+    }
+    case 'cpu_health': {
+      const command = 'cat /proc/loadavg 2>/dev/null || uptime';
+      const result = await runMany(target, [command]);
+      const output = result[command].stdout.trim();
+      const load = Number(output.split(/\s+/)[0]);
+      metrics = [
+        {
+          name: '1-minute load average',
+          value: Number.isFinite(load) ? load : 'unknown',
+          status: !Number.isFinite(load)
+            ? 'ok'
+            : load >= 4
+              ? 'critical'
+              : load >= 2
+                ? 'warning'
+                : 'ok',
+          threshold: 'warning >=2, critical >=4 (normalize against CPU count)',
+        },
+      ];
+      rawOutput = output;
+      break;
+    }
+    case 'disk_health': {
+      const { 'df -h': dfRes } = await runMany(target, ['df -h']);
+      metrics = parseDiskUsage(dfRes.stdout);
+      rawOutput = dfRes.stdout;
+      break;
+    }
+    case 'storage_health': {
+      const results = await runMany(target, ['df -h', 'lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT']);
+      metrics = parseDiskUsage(results['df -h'].stdout);
+      rawOutput = Object.values(results)
+        .map((r) => r.stdout)
+        .join('\n---\n');
+      break;
+    }
+    case 'ram_health': {
+      const { 'free -m': freeRes } = await runMany(target, ['free -m']);
+      metrics = parseMemUsage(freeRes.stdout);
+      rawOutput = freeRes.stdout;
       break;
     }
     case 'network_health': {
@@ -202,6 +253,47 @@ export async function diagnoseSsh(
           status: results['ip -brief addr 2>/dev/null || ifconfig'].code === 0 ? 'ok' : 'critical',
         },
       ];
+      break;
+    }
+    case 'hardware_health': {
+      const results = await runMany(target, [
+        'uname -a',
+        'lscpu 2>/dev/null | head -30',
+        'lsblk -o NAME,SIZE,TYPE,MODEL',
+      ]);
+      metrics = [
+        {
+          name: 'Hardware inventory commands completed',
+          value: Object.values(results).filter((r) => r.code === 0).length,
+          status: 'ok',
+        },
+      ];
+      rawOutput = Object.values(results)
+        .map((r) => r.stdout)
+        .join('\n---\n');
+      break;
+    }
+    case 'virtualization_health': {
+      const command = 'systemd-detect-virt 2>/dev/null || echo bare-metal';
+      const result = await runMany(target, [command]);
+      const value = result[command].stdout.trim() || 'unknown';
+      metrics = [{ name: 'Virtualization platform', value, status: 'ok' }];
+      rawOutput = value;
+      break;
+    }
+    case 'security_health': {
+      const command =
+        "sshd -T 2>/dev/null | grep -E 'passwordauthentication|permitrootlogin|pubkeyauthentication' || true";
+      const result = await runMany(target, [command]);
+      const output = result[command].stdout;
+      metrics = [
+        {
+          name: 'SSH hardening settings reported',
+          value: output.split('\n').filter(Boolean).length,
+          status: 'ok',
+        },
+      ];
+      rawOutput = output;
       break;
     }
     case 'file_health': {

@@ -48,7 +48,7 @@ describe('Infra RCA connection diagnostics', () => {
     expect(html).toContain('ECONNREFUSED');
     expect(html).toContain('Windows IT checks (read-only)');
     expect(html).toContain('winrm enumerate winrm/config/listener');
-    expect(html).toContain('Basic authentication over HTTP only');
+    expect(html).toContain('Basic/NTLM over HTTP is supported');
     expect(html).not.toContain('fixture-secret');
   });
 

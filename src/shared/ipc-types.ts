@@ -80,6 +80,8 @@ export interface GoogleConnectionStatus {
 // ---------------------------------------------------------------------------
 
 export type InfraRcaProtocol = 'ssh' | 'winrm' | 'snmp' | 'db';
+export type InfraRcaWinrmTransport = 'http' | 'https';
+export type InfraRcaWinrmAuth = 'basic' | 'ntlm' | 'kerberos' | 'auto';
 
 export interface InfraRcaConnectionResult {
   reachable: boolean;
@@ -101,6 +103,9 @@ export interface InfraRcaTargetPublic {
   protocol: InfraRcaProtocol;
   host: string;
   group?: string;
+  winrmTransport?: InfraRcaWinrmTransport;
+  winrmAuth?: InfraRcaWinrmAuth;
+  winrmRejectUnauthorized?: boolean;
 }
 
 /** Renderer -> main payload for saving a target. Secrets flow one-way into the encrypted store and are never read back. */
@@ -118,6 +123,9 @@ export interface InfraRcaTargetInput {
   dbEngine?: 'postgres' | 'mysql';
   dbName?: string;
   group?: string;
+  winrmTransport?: InfraRcaWinrmTransport;
+  winrmAuth?: InfraRcaWinrmAuth;
+  winrmRejectUnauthorized?: boolean;
 }
 
 export interface InfraRcaImportInput {

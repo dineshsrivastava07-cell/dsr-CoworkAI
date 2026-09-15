@@ -2,7 +2,10 @@ import { Socket } from 'node:net';
 import type { InfraRcaConnectionResult } from '../../shared/ipc-types';
 import type { TargetCredentials } from './infra-drivers/types';
 
-type Endpoint = Pick<TargetCredentials, 'host' | 'protocol' | 'port' | 'dbEngine'>;
+type Endpoint = Pick<
+  TargetCredentials,
+  'host' | 'protocol' | 'port' | 'dbEngine' | 'winrmTransport' | 'winrmAuth'
+>;
 
 function portFor(target: Endpoint): number {
   return (
@@ -23,7 +26,9 @@ function winrmHelp(target: Endpoint) {
   return target.protocol === 'winrm'
     ? {
         limitation:
-          'WinRM currently supports Basic authentication over HTTP only. HTTPS/Kerberos/NTLM are not configured by this adapter. Do not weaken organizational authentication or firewall policy to connect.',
+          target.winrmAuth === 'kerberos'
+            ? 'WinRM Kerberos uses the current Windows domain ticket and requires a Windows V-Coworker host. It never falls back to password authentication.'
+            : `WinRM ${target.winrmAuth === 'ntlm' ? 'NTLM' : target.winrmAuth === 'basic' ? 'Basic' : 'auto-detected Basic/NTLM'} over ${target.winrmTransport === 'https' || target.port === 5986 ? 'HTTPS' : 'HTTP'} is supported. HTTPS certificates are verified by default.`,
         localChecks: [
           'Get-Service WinRM',
           `Get-NetTCPConnection -State Listen -LocalPort ${portFor(target)} -ErrorAction SilentlyContinue`,

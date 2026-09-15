@@ -7,7 +7,7 @@ import {
 import { log, logWarn } from '../utils/logger';
 import type { TargetCredentials } from './infra-drivers/types';
 import type { InfraRcaImportInput, InfraRcaImportResult } from '../../shared/ipc-types';
-import { planInfraImport } from './infra-rca-import';
+import { planInfraImport, validateTarget } from './infra-rca-import';
 
 interface InfraRcaStoreShape {
   targets: TargetCredentials[];
@@ -15,7 +15,14 @@ interface InfraRcaStoreShape {
 
 export type PublicTargetInfo = Pick<
   TargetCredentials,
-  'id' | 'name' | 'protocol' | 'host' | 'group'
+  | 'id'
+  | 'name'
+  | 'protocol'
+  | 'host'
+  | 'group'
+  | 'winrmTransport'
+  | 'winrmAuth'
+  | 'winrmRejectUnauthorized'
 >;
 
 const defaults: InfraRcaStoreShape = { targets: [] };
@@ -52,7 +59,27 @@ class InfraRcaStore {
   listTargets(): PublicTargetInfo[] {
     return this.store
       .get('targets', [])
-      .map(({ id, name, protocol, host, group }) => ({ id, name, protocol, host, group }));
+      .map(
+        ({
+          id,
+          name,
+          protocol,
+          host,
+          group,
+          winrmTransport,
+          winrmAuth,
+          winrmRejectUnauthorized,
+        }) => ({
+          id,
+          name,
+          protocol,
+          host,
+          group,
+          winrmTransport,
+          winrmAuth,
+          winrmRejectUnauthorized,
+        })
+      );
   }
 
   importTargets(input: InfraRcaImportInput, commit = false): InfraRcaImportResult {
@@ -85,6 +112,7 @@ class InfraRcaStore {
     }
     const existingIndex = targets.findIndex((t) => t.id === id);
     const saved: TargetCredentials = { ...target, id };
+    validateTarget(saved);
     if (existingIndex >= 0) {
       targets[existingIndex] = saved;
     } else {

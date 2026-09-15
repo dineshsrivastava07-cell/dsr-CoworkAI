@@ -17,6 +17,9 @@ const fields = [
   'dbEngine',
   'dbName',
   'group',
+  'winrmTransport',
+  'winrmAuth',
+  'winrmRejectUnauthorized',
 ] as const;
 const headers = new Map(fields.map((field) => [field.toLowerCase(), field]));
 
@@ -74,14 +77,26 @@ function parseCsv(content: string): Record<string, unknown>[] {
   });
 }
 
-function pickFields(raw: unknown): Record<string, string | number> {
+function pickFields(raw: unknown): Record<string, string | number | boolean> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw))
     throw new Error('Each target must be an object.');
-  const result: Record<string, string | number> = {};
+  const result: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(raw)) {
     const field = headers.get(key.toLowerCase());
     if (!field) throw new Error('Target contains an unknown field. Use the template fields.');
     if (value === undefined || value === null || value === '') continue;
+    if (field === 'winrmRejectUnauthorized' && typeof value === 'boolean') {
+      result[field] = value;
+      continue;
+    }
+    if (field === 'winrmRejectUnauthorized' && typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true' || normalized === 'false') {
+        result[field] = normalized === 'true';
+        continue;
+      }
+      throw new Error('winrmRejectUnauthorized must be true or false.');
+    }
     if (typeof value !== 'string' && typeof value !== 'number')
       throw new Error('Target fields must contain text or numbers.');
     // Keep credentials verbatim. Blank optional cells inherit existing/shared values.
@@ -92,7 +107,7 @@ function pickFields(raw: unknown): Record<string, string | number> {
   return result;
 }
 
-function validate(target: TargetCredentials): void {
+export function validateTarget(target: TargetCredentials): void {
   if (!target.name || target.name.length > 200)
     throw new Error('Name is required and must be at most 200 characters.');
   if (!target.host || target.host.length > 253 || !/^[\w.:%-]+$/.test(target.host))
@@ -110,7 +125,18 @@ function validate(target: TargetCredentials): void {
     throw new Error('Username is required; enter it per row or in shared credentials.');
   if (target.protocol === 'ssh' && !target.secret && !target.privateKey)
     throw new Error('SSH requires a password or private key.');
-  if (target.protocol === 'winrm' && !target.secret) throw new Error('WinRM requires a password.');
+  if (target.protocol === 'winrm' && target.winrmAuth !== 'kerberos' && !target.secret)
+    throw new Error('WinRM requires a password unless Kerberos uses the Windows domain ticket.');
+  if (target.protocol === 'winrm') {
+    if (target.winrmTransport && !['http', 'https'].includes(target.winrmTransport))
+      throw new Error('WinRM transport must be http or https.');
+    if (target.winrmAuth && !['basic', 'ntlm', 'kerberos', 'auto'].includes(target.winrmAuth))
+      throw new Error('WinRM authentication must be basic, ntlm, kerberos or auto.');
+    if (target.winrmAuth === 'basic' && /\\|@/.test(target.username || ''))
+      throw new Error(
+        'Basic WinRM authentication requires a local username; use ntlm or kerberos for a domain account.'
+      );
+  }
   if (target.protocol === 'snmp' && !target.community)
     throw new Error('SNMP requires a community string.');
   if (target.protocol === 'db' && !['postgres', 'mysql'].includes(target.dbEngine || ''))
@@ -193,7 +219,7 @@ export function planInfraImport(
             id: old?.id || randomUUID(),
             port: merged.port === undefined ? undefined : Number(merged.port),
           } as TargetCredentials;
-          validate(target);
+          validateTarget(target);
           if (oldIndex === undefined) {
             nextTargets.push(target);
             result.added++;

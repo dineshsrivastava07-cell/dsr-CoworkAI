@@ -36,14 +36,61 @@ const BROKER_SECRET = process.env.INFRA_RCA_BROKER_SECRET;
 
 const CATEGORY_ENUM: DiagnosticCategory[] = [
   'os_health',
+  'service_health',
+  'process_health',
+  'cpu_health',
   'disk_health',
+  'storage_health',
   'ram_health',
   'network_health',
+  'hardware_health',
+  'virtualization_health',
+  'security_health',
   'db_health',
   'printer_health',
   'power_health',
   'file_health',
 ];
+
+const EXPERT_COVERAGE: Record<TargetCredentials['protocol'], DiagnosticCategory[]> = {
+  ssh: [
+    'os_health',
+    'service_health',
+    'process_health',
+    'cpu_health',
+    'disk_health',
+    'storage_health',
+    'ram_health',
+    'network_health',
+    'hardware_health',
+    'virtualization_health',
+    'security_health',
+    'file_health',
+  ],
+  winrm: [
+    'os_health',
+    'service_health',
+    'process_health',
+    'cpu_health',
+    'disk_health',
+    'storage_health',
+    'ram_health',
+    'network_health',
+    'hardware_health',
+    'virtualization_health',
+    'security_health',
+    'file_health',
+  ],
+  snmp: [
+    'os_health',
+    'disk_health',
+    'network_health',
+    'hardware_health',
+    'printer_health',
+    'power_health',
+  ],
+  db: ['db_health'],
+};
 
 interface BrokerTargetResponse {
   target?: TargetCredentials;
@@ -201,7 +248,7 @@ function createMcpServer() {
         {
           name: 'infra_diagnose',
           description:
-            'Run read-only health diagnostics against a configured target over its native protocol (SSH for Linux/Unix, WinRM/PowerShell for Windows [best-effort], SNMP for network gear/printers/UPS via standard MIBs, direct connection for Postgres/MySQL). Returns structured metrics with status (ok/warning/critical) and a plain-language root-cause hypothesis when something is unhealthy. Never modifies anything.',
+            'Run expert, read-only health diagnostics against a configured target over its native protocol. Coverage includes OS/services/processes/CPU/RAM/storage/network/hardware/virtualization/security for SSH and WinRM, standard MIB network/power/printer/storage checks for SNMP, and connection/query health for Postgres/MySQL. Returns structured metrics, evidence and a plain-language root-cause hypothesis. Never modifies anything.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -216,6 +263,37 @@ function createMcpServer() {
               },
             },
             required: ['target_name', 'category'],
+          },
+        },
+        {
+          name: 'infra_expert_assess',
+          description:
+            'Run a bounded expert assessment across all supported read-only categories for one target. It returns per-category status, errors, evidence coverage and unsupported capabilities; it never applies a fix. Use this before proposing a remediation or scheduling a health check.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              target_name: {
+                type: 'string',
+                description: 'Name of a target from infra_list_targets',
+              },
+              scope: {
+                type: 'string',
+                enum: ['quick', 'full'],
+                description:
+                  'quick checks core availability; full includes hardware, virtualization and security checks',
+              },
+            },
+            required: ['target_name'],
+          },
+        },
+        {
+          name: 'infra_capabilities',
+          description:
+            'Return the expert coverage matrix for configured targets: supported OS, service, process, CPU, memory, storage, network, hardware, virtualization, security, printer, UPS and database checks, plus protocol limitations. This is read-only and contains no credentials.',
+          inputSchema: {
+            type: 'object',
+            properties: { target_name: { type: 'string' } },
+            required: [],
           },
         },
         {
@@ -323,6 +401,91 @@ function createMcpServer() {
           const target = await resolveTarget(target_name);
           const result = await diagnose(target, category);
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        }
+
+        case 'infra_expert_assess': {
+          const { target_name, scope = 'full' } = args as {
+            target_name: string;
+            scope?: 'quick' | 'full';
+          };
+          if (scope !== 'quick' && scope !== 'full') throw new Error('scope must be quick or full');
+          const target = await resolveTarget(target_name);
+          const categories: DiagnosticCategory[] =
+            scope === 'quick'
+              ? ['os_health', 'cpu_health', 'ram_health', 'disk_health', 'network_health']
+              : CATEGORY_ENUM;
+          const diagnostics = [];
+          for (const category of categories) {
+            if (!EXPERT_COVERAGE[target.protocol].includes(category)) {
+              diagnostics.push({
+                category,
+                status: 'unsupported',
+                error: `No ${category} driver is registered for ${target.protocol}.`,
+              });
+              continue;
+            }
+            try {
+              const result = await diagnose(target, category);
+              diagnostics.push({ category, status: 'ok', result });
+            } catch (error) {
+              diagnostics.push({
+                category,
+                status: 'error',
+                error: error instanceof Error ? error.message : 'Diagnostic failed',
+              });
+            }
+          }
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  { target: target.name, protocol: target.protocol, scope, diagnostics },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        }
+
+        case 'infra_capabilities': {
+          const names = await listTargetNames();
+          const requested =
+            typeof args?.target_name === 'string'
+              ? names.filter((item) => item.name === args.target_name)
+              : names;
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    targets: requested.map((target) => ({
+                      ...target,
+                      supportedCategories:
+                        EXPERT_COVERAGE[target.protocol as TargetCredentials['protocol']] || [],
+                      limitations:
+                        target.protocol === 'winrm'
+                          ? [
+                              'Kerberos requires Windows native domain ticket; Basic/NTLM support depends on target policy.',
+                              'Hardware and security results depend on CIM/provider availability.',
+                            ]
+                          : target.protocol === 'snmp'
+                            ? [
+                                'Only standard MIBs are queried; vendor-specific and SNMPv3 data need a dedicated driver.',
+                              ]
+                            : target.protocol === 'db'
+                              ? ['Database coverage is engine-specific and read-only.']
+                              : ['Commands depend on OS distribution and account privileges.'],
+                    })),
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
         }
 
         case 'infra_ping_check': {

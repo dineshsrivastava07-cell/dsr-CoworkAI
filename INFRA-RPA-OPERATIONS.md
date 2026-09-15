@@ -16,7 +16,7 @@ For the complete operator procedures, troubleshooting tables and test records, s
 Example inventory without credentials:
 
 ```csv
-name,protocol,host,port,username,group,dbEngine,dbName
+name,protocol,host,port,username,group,dbEngine,dbName,winrmTransport,winrmAuth,winrmRejectUnauthorized
 mum-linux-001,ssh,10.10.1.11,22,svc_diagnostics,Mumbai-Production,,
 mum-linux-002,ssh,10.10.1.12,22,svc_diagnostics,Mumbai-Production,,
 del-win-001,winrm,10.20.1.11,5985,DOMAIN\svc_diagnostics,Delhi-Production,,
@@ -28,18 +28,21 @@ This mixed example requires suitable per-row credentials or separate credential 
 
 Supported columns/JSON fields:
 
-| Field                      | Purpose                                                              |
-| -------------------------- | -------------------------------------------------------------------- |
-| `name`                     | Unique target name used in chat; matching ignores case during import |
-| `host`                     | Hostname or IP address; no URL scheme or path                        |
-| `protocol`                 | `ssh`, `winrm`, `snmp`, or `db`                                      |
-| `port`                     | Optional integer 1–65535; protocol default when omitted              |
-| `group`                    | Optional site, environment or operational group                      |
-| `username`                 | SSH, WinRM or database account                                       |
-| `secret`                   | Password; preferably enter using the shared password control         |
-| `privateKey`, `passphrase` | SSH private-key contents and optional passphrase                     |
-| `community`                | SNMP v2c community; there is no SNMPv3 setup in this driver          |
-| `dbEngine`, `dbName`       | `postgres` / `mysql`, and database name                              |
+| Field                      | Purpose                                                                             |
+| -------------------------- | ----------------------------------------------------------------------------------- |
+| `name`                     | Unique target name used in chat; matching ignores case during import                |
+| `host`                     | Hostname or IP address; no URL scheme or path                                       |
+| `protocol`                 | `ssh`, `winrm`, `snmp`, or `db`                                                     |
+| `port`                     | Optional integer 1–65535; protocol default when omitted                             |
+| `group`                    | Optional site, environment or operational group                                     |
+| `username`                 | SSH, WinRM or database account                                                      |
+| `secret`                   | Password; preferably enter using the shared password control                        |
+| `privateKey`, `passphrase` | SSH private-key contents and optional passphrase                                    |
+| `community`                | SNMP v2c community; there is no SNMPv3 setup in this driver                         |
+| `dbEngine`, `dbName`       | `postgres` / `mysql`, and database name                                             |
+| `winrmTransport`           | WinRM `http` (5985) or `https` (5986); choose explicitly for policy                 |
+| `winrmAuth`                | `auto`, `basic`, `ntlm`, or `kerberos`; NTLM/Kerberos require a domain/UPN username |
+| `winrmRejectUnauthorized`  | HTTPS certificate verification; keep `true` unless an approved exception exists     |
 
 Non-empty row values override shared values. For updates, omitted/blank optional values preserve saved fields unless a shared value replaces them. Shared credentials are copied into each target record; this is not a central reusable credential-profile/vault feature. Updating credentials for a group means reimporting those names with **Update existing targets** selected. Imports preserve target IDs. A host/protocol change requires a new name so credentials are not silently redirected to another endpoint. Duplicate names in one file are rejected.
 
@@ -47,7 +50,7 @@ Non-empty row values override shared values. For updates, omitted/blank optional
 
 Use the search field to filter the inventory by name, host, protocol or group; the UI displays 50 entries per page. The **Test** button checks TCP reachability for SSH, WinRM and databases, without verifying login or diagnostic privileges. For SNMP it sends a read-only request and requires a response.
 
-Failed checks show the error category, tested port and corrective steps. WinRM results include expandable read-only Windows checks and the adapter's authentication limits. The chat tool `infra_ping_check` shares the same protocol-aware check and marks failed readiness as a tool error. See [WinRM troubleshooting](IT-USER-GUIDE.md#winrm-host-unreachable-timeout-or-connection-refused) for host-down, timeout and refused-connection procedures.
+Failed checks show the error category, tested port and corrective steps. WinRM results include expandable read-only Windows checks and the selected transport/authentication policy. The chat tool `infra_ping_check` shares the same protocol-aware check and marks failed readiness as a tool error. Use `infra_capabilities` and `infra_expert_assess` for protocol-aware coverage and quick/full expert read-only assessments. See [WinRM troubleshooting](IT-USER-GUIDE.md#winrm-host-unreachable-timeout-or-connection-refused) for host-down, timeout and refused-connection procedures.
 
 Example chat requests:
 

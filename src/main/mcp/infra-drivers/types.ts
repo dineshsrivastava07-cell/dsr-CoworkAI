@@ -6,9 +6,16 @@
 
 export type DiagnosticCategory =
   | 'os_health'
+  | 'service_health'
+  | 'process_health'
+  | 'cpu_health'
   | 'disk_health'
+  | 'storage_health'
   | 'ram_health'
   | 'network_health'
+  | 'hardware_health'
+  | 'virtualization_health'
+  | 'security_health'
   | 'db_health'
   | 'printer_health'
   | 'power_health'
@@ -47,6 +54,10 @@ export interface TargetCredentials {
   dbEngine?: 'postgres' | 'mysql';
   dbName?: string;
   group?: string;
+  /** WinRM transport and authentication are explicit so the adapter never silently downgrades security. */
+  winrmTransport?: 'http' | 'https';
+  winrmAuth?: 'basic' | 'ntlm' | 'kerberos' | 'auto';
+  winrmRejectUnauthorized?: boolean;
 }
 
 export function worstStatus(metrics: DiagnosticMetric[]): MetricStatus {

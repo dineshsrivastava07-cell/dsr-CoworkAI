@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { InfraRcaImportInput, InfraRcaImportResult } from '../../../shared/ipc-types';
 
 const template =
-  'name,protocol,host,port,username,group,dbEngine,dbName\nprod-web-01,ssh,10.0.0.10,22,svc_diagnostics,Production,,\nprod-web-02,ssh,10.0.0.11,22,svc_diagnostics,Production,,\n';
+  'name,protocol,host,port,username,group,dbEngine,dbName,winrmTransport,winrmAuth,winrmRejectUnauthorized\nprod-web-01,ssh,10.0.0.10,22,svc_diagnostics,Production,,,,\nprod-win-01,winrm,10.0.0.20,5986,DOMAIN\\svc_diagnostics,Production,,,https,ntlm,true\n';
 const inputClass =
   'w-full px-3 py-2 rounded-lg bg-background border border-border text-text-primary text-sm';
 
@@ -186,6 +186,41 @@ export function InfraBulkImport({ onImported }: { onImported: () => Promise<void
               <option value="postgres">PostgreSQL</option>
               <option value="mysql">MySQL</option>
             </select>
+          </label>
+          <label className="text-xs text-text-secondary">
+            Default WinRM transport
+            <select
+              className={inputClass}
+              value={input.defaults?.winrmTransport || ''}
+              onChange={(e) => shared('winrmTransport', e.target.value)}
+            >
+              <option value="">Use inventory / saved value</option>
+              <option value="http">HTTP (5985)</option>
+              <option value="https">HTTPS (5986)</option>
+            </select>
+          </label>
+          <label className="text-xs text-text-secondary">
+            Default WinRM authentication
+            <select
+              className={inputClass}
+              value={input.defaults?.winrmAuth || ''}
+              onChange={(e) => shared('winrmAuth', e.target.value)}
+            >
+              <option value="">Auto</option>
+              <option value="basic">Basic</option>
+              <option value="ntlm">NTLM</option>
+              <option value="kerberos">Kerberos (Windows ticket)</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-text-secondary col-span-2">
+            <input
+              type="checkbox"
+              checked={input.defaults?.winrmRejectUnauthorized !== false}
+              onChange={(e) =>
+                shared('winrmRejectUnauthorized', e.target.checked ? 'true' : 'false')
+              }
+            />
+            Verify WinRM HTTPS certificates (recommended)
           </label>
         </div>
         <details>

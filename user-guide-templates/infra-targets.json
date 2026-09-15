@@ -12,8 +12,11 @@
     "protocol": "winrm",
     "host": "192.0.2.21",
     "port": 5985,
-    "username": "svc_diagnostics",
-    "group": "QA-Windows"
+    "username": "DOMAIN\\svc_diagnostics",
+    "group": "QA-Windows",
+    "winrmTransport": "http",
+    "winrmAuth": "ntlm",
+    "winrmRejectUnauthorized": true
   },
   {
     "name": "qa-switch-001",

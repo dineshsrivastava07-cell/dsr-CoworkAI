@@ -154,6 +154,7 @@ export async function diagnoseSnmp(
         break;
       }
       case 'printer_health':
+      case 'hardware_health':
       case 'os_health': {
         const varbinds = await snmpGet(session, [OID.sysDescr, OID.sysUpTime]);
         const [descr, upTime] = varbinds.map((v) =>
