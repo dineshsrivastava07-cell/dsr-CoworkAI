@@ -336,6 +336,8 @@ Replace the host and port for your approved endpoint. `TcpTestSucceeded` is a ne
 
 ### WinRM: host unreachable, timeout or connection refused
 
+Builds containing the connection-diagnostics repair show a failure category, the tested port and corrective steps below **Test**. Expand **Windows IT checks (read-only)** for local PowerShell commands. The chat tool `infra_ping_check` uses the same check and reports failed readiness as a tool error; SNMP targets use a read-only SNMP probe. These changes explain failures but cannot start a service or repair a route on an unreachable computer.
+
 1. Confirm the inventory address with the Windows owner. Test from the computer running V-Coworker, because another workstation may have different network access. On macOS, use the following read-only check, replacing the placeholder:
 
    ```bash

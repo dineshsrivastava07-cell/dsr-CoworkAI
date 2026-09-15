@@ -15,7 +15,6 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, Tray } from 'electron';
 import { join, resolve, dirname, isAbsolute, basename } from 'path';
 import * as fs from 'fs';
-import * as net from 'net';
 import { execFileSync } from 'child_process';
 import { config } from 'dotenv';
 import { initDatabase, closeDatabase } from './db/database';
@@ -74,6 +73,7 @@ import {
 } from './google';
 import { startInfraRcaBroker, stopInfraRcaBroker } from './mcp/infra-rca-broker';
 import { infraRcaStore } from './mcp/infra-rca-store';
+import { checkInfraConnection } from './mcp/infra-connection-check';
 import {
   ScheduledTaskManager,
   type ScheduledTaskCreateInput,
@@ -2433,48 +2433,7 @@ ipcMain.handle('infraRca.testConnection', async (_event, id: string) => {
   if (!full) {
     return { reachable: false, error: 'Target not found.' };
   }
-  if (full.protocol === 'snmp') {
-    const start = Date.now();
-    try {
-      const { probeSnmp } = await import('./mcp/infra-drivers/snmp-driver');
-      await probeSnmp(full);
-      return { reachable: true, latencyMs: Date.now() - start };
-    } catch {
-      return {
-        reachable: false,
-        error: 'SNMP probe failed. Check network access, UDP port and community.',
-      };
-    }
-  }
-  const defaultPort =
-    full.protocol === 'ssh'
-      ? 22
-      : full.protocol === 'winrm'
-        ? 5985
-        : full.protocol === 'db'
-          ? full.dbEngine === 'mysql'
-            ? 3306
-            : 5432
-          : 161;
-  const port = full.port || defaultPort;
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    const start = Date.now();
-    const timer = setTimeout(() => {
-      socket.destroy();
-      resolve({ reachable: false, error: 'Connection timed out.' });
-    }, 5000);
-    socket
-      .connect(port, full.host, () => {
-        clearTimeout(timer);
-        socket.destroy();
-        resolve({ reachable: true, latencyMs: Date.now() - start });
-      })
-      .on('error', (err: Error) => {
-        clearTimeout(timer);
-        resolve({ reachable: false, error: err.message });
-      });
-  });
+  return checkInfraConnection(full);
 });
 
 // Skills API handlers

@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { AlertCircle, CheckCircle, ChevronDown, Loader2, Plus, Server, Trash2 } from 'lucide-react';
+import { AlertCircle, ChevronDown, Loader2, Plus, Server, Trash2 } from 'lucide-react';
 import type {
   InfraRcaProtocol,
   InfraRcaTargetInput,
   InfraRcaTargetPublic,
+  InfraRcaConnectionResult,
 } from '../../../shared/ipc-types';
 import type { MCPServerConfig, MCPServerStatus } from './shared';
 import { InfraBulkImport } from './InfraBulkImport';
+import { InfraConnectionResult } from './InfraConnectionResult';
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
@@ -48,9 +50,7 @@ export function SettingsInfraRCA({
   const [form, setForm] = useState<InfraRcaTargetInput>(emptyForm);
   const [isSaving, setIsSaving] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<
-    Record<string, { reachable: boolean; error?: string; latencyMs?: number }>
-  >({});
+  const [testResults, setTestResults] = useState<Record<string, InfraRcaConnectionResult>>({});
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
@@ -225,33 +225,17 @@ export function SettingsInfraRCA({
                   key={target.id}
                   className="flex items-center justify-between px-3 py-2 rounded-lg bg-background border border-border-subtle"
                 >
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-text-primary">{target.name}</div>
                     <div className="text-xs text-text-muted">
                       {PROTOCOL_LABELS[target.protocol]} · {target.host}{' '}
                       {target.group ? `· ${target.group}` : ''}
                     </div>
                     {testResult && (
-                      <div
-                        className={`text-xs mt-1 flex items-center gap-1 ${testResult.reachable ? 'text-success' : 'text-error'}`}
-                      >
-                        {testResult.reachable ? (
-                          <>
-                            <CheckCircle className="w-3 h-3" />{' '}
-                            {target.protocol === 'snmp'
-                              ? 'SNMP responded'
-                              : 'TCP reachable (login not tested)'}{' '}
-                            ({testResult.latencyMs}ms)
-                          </>
-                        ) : (
-                          <>
-                            <AlertCircle className="w-3 h-3" /> {testResult.error || 'Unreachable'}
-                          </>
-                        )}
-                      </div>
+                      <InfraConnectionResult result={testResult} protocol={target.protocol} />
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0 self-start ml-2">
                     <button
                       onClick={() => handleTestConnection(target.id)}
                       disabled={testingId === target.id}

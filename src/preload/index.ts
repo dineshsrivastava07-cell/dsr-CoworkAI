@@ -37,6 +37,7 @@ import type {
   InfraRcaTargetInput,
   InfraRcaImportInput,
   InfraRcaImportResult,
+  InfraRcaConnectionResult,
   RemoteConfig,
   GatewayConfig,
   PairedUser,
@@ -277,9 +278,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('infraRca.saveTarget', target),
     deleteTarget: (id: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('infraRca.deleteTarget', id),
-    testConnection: (
-      id: string
-    ): Promise<{ reachable: boolean; latencyMs?: number; error?: string }> =>
+    testConnection: (id: string): Promise<InfraRcaConnectionResult> =>
       ipcRenderer.invoke('infraRca.testConnection', id),
   },
 
@@ -600,9 +599,7 @@ declare global {
           target: InfraRcaTargetInput
         ) => Promise<{ success: boolean; id?: string; error?: string }>;
         deleteTarget: (id: string) => Promise<{ success: boolean; error?: string }>;
-        testConnection: (
-          id: string
-        ) => Promise<{ reachable: boolean; latencyMs?: number; error?: string }>;
+        testConnection: (id: string) => Promise<InfraRcaConnectionResult>;
       };
       skills: {
         getAll: () => Promise<Skill[]>;

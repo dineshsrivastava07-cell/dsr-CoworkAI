@@ -21,7 +21,6 @@
 import { type CallToolResult, type ListToolsResult, Server } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as http from 'node:http';
-import * as net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import type { DiagnosticCategory, TargetCredentials } from './infra-drivers/types';
 import { diagnoseSsh, sshExec } from './infra-drivers/ssh-driver';
@@ -30,6 +29,7 @@ import { diagnoseSnmp } from './infra-drivers/snmp-driver';
 import { diagnoseDb, dbExecuteFix, dbQuery } from './infra-drivers/db-driver';
 import { diagnoseOnvif } from './infra-drivers/onvif-driver';
 import { selectInfraTargetPage } from './infra-target-page';
+import { checkInfraConnection } from './infra-connection-check';
 
 const BROKER_PORT = process.env.INFRA_RCA_BROKER_PORT;
 const BROKER_SECRET = process.env.INFRA_RCA_BROKER_SECRET;
@@ -156,40 +156,6 @@ function pruneExpiredProposals(): void {
   }
 }
 
-async function pingCheck(
-  target: TargetCredentials
-): Promise<{ reachable: boolean; latencyMs?: number; error?: string }> {
-  const port =
-    target.port ||
-    (target.protocol === 'ssh'
-      ? 22
-      : target.protocol === 'winrm'
-        ? 5985
-        : target.protocol === 'db'
-          ? target.dbEngine === 'mysql'
-            ? 3306
-            : 5432
-          : 161);
-  const start = Date.now();
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    const timer = setTimeout(() => {
-      socket.destroy();
-      resolve({ reachable: false, error: 'timeout' });
-    }, 5000);
-    socket
-      .connect(port, target.host, () => {
-        clearTimeout(timer);
-        socket.destroy();
-        resolve({ reachable: true, latencyMs: Date.now() - start });
-      })
-      .on('error', (err) => {
-        clearTimeout(timer);
-        resolve({ reachable: false, error: err.message });
-      });
-  });
-}
-
 async function executeFixCommand(target: TargetCredentials, command: string): Promise<string> {
   switch (target.protocol) {
     case 'ssh': {
@@ -255,7 +221,7 @@ function createMcpServer() {
         {
           name: 'infra_ping_check',
           description:
-            'Cheap TCP really/latency check for a target — use before a full diagnose, or as a lightweight scheduled watch condition.',
+            'Readiness check: TCP reachability (not login) for SSH/WinRM/database targets, or a read-only SNMP probe. Returns failure category and corrective checks; use before a full diagnose.',
           inputSchema: {
             type: 'object',
             properties: { target_name: { type: 'string' } },
@@ -362,8 +328,11 @@ function createMcpServer() {
         case 'infra_ping_check': {
           const { target_name } = args as { target_name: string };
           const target = await resolveTarget(target_name);
-          const result = await pingCheck(target);
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          const result = await checkInfraConnection(target);
+          return {
+            isError: !result.reachable,
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          };
         }
 
         case 'infra_query_db': {

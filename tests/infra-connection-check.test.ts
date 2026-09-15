@@ -1,0 +1,135 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createServer, Socket } from 'node:net';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { createElement } from 'react';
+import {
+  checkInfraConnection,
+  describeInfraConnectionFailure,
+} from '../src/main/mcp/infra-connection-check';
+import { InfraConnectionResult } from '../src/renderer/components/settings/InfraConnectionResult';
+
+const snmp = vi.hoisted(() => ({ probe: vi.fn() }));
+vi.mock('../src/main/mcp/infra-drivers/snmp-driver', () => ({ probeSnmp: snmp.probe }));
+const target = {
+  id: 'qa',
+  name: 'qa-windows',
+  host: '127.0.0.1',
+  protocol: 'winrm' as const,
+  secret: 'fixture-secret',
+};
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+  snmp.probe.mockReset();
+});
+
+describe('Infra RCA connection diagnostics', () => {
+  it.each(['EHOSTDOWN', 'EHOSTUNREACH', 'ENETUNREACH', 'ETIMEDOUT'])(
+    'explains %s without asserting the computer is offline',
+    (code) => {
+      const result = describeInfraConnectionFailure({ code }, target);
+      expect(result).toMatchObject({ reachable: false, check: 'tcp', port: 5985, errorCode: code });
+      expect(result.nextSteps?.join(' ')).toContain('does not prove');
+      expect(result.localChecks).toContain('Get-Service WinRM');
+    }
+  );
+
+  it('explains refusal and renders the Windows instructions without credentials', () => {
+    const result = describeInfraConnectionFailure(
+      new Error('connect ECONNREFUSED fixture-secret'),
+      target
+    );
+    expect(result.error).toContain('before login');
+    expect(result.nextSteps?.join(' ')).toContain('listening');
+    const html = renderToStaticMarkup(
+      createElement(InfraConnectionResult, { result, protocol: 'winrm' })
+    );
+    expect(html).toContain('ECONNREFUSED');
+    expect(html).toContain('Windows IT checks (read-only)');
+    expect(html).toContain('winrm enumerate winrm/config/listener');
+    expect(html).toContain('Basic authentication over HTTP only');
+    expect(html).not.toContain('fixture-secret');
+  });
+
+  it.each(['ENOTFOUND', 'EAI_AGAIN', 'EPERM', 'EACCES'])(
+    'classifies %s separately from login failures',
+    (code) => {
+      const result = describeInfraConnectionFailure({ code }, { ...target, protocol: 'ssh' });
+      expect(result.errorCode).toBe(code);
+      expect(result.localChecks).toBeUndefined();
+      expect(result.port).toBe(22);
+    }
+  );
+
+  it('does not return unclassified driver text', () => {
+    const result = describeInfraConnectionFailure(new Error('secret=fixture-secret'), target);
+    expect(result.errorCode).toBe('CONNECTION_FAILED');
+    expect(JSON.stringify(result)).not.toContain('fixture-secret');
+  });
+
+  it('uses the configured custom port in the read-only checks', () => {
+    const result = describeInfraConnectionFailure(
+      { code: 'ECONNREFUSED' },
+      { ...target, port: 12345 }
+    );
+    expect(result.port).toBe(12345);
+    expect(result.localChecks?.join('\n')).toContain('-LocalPort 12345');
+  });
+
+  it('connects to a real TCP listener and detects refusal after that listener closes', async () => {
+    const server = createServer((socket) => socket.end());
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('No TCP port assigned');
+    const endpoint = { ...target, port: address.port };
+    try {
+      const result = await checkInfraConnection(endpoint);
+      expect(result).toMatchObject({ reachable: true, check: 'tcp', port: address.port });
+      expect(result.nextSteps?.join(' ')).toContain('have not been tested');
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
+    const refused = await checkInfraConnection(endpoint);
+    expect(refused).toMatchObject({ reachable: false, errorCode: 'ECONNREFUSED' });
+  });
+
+  it('times out a stalled socket and destroys it without leaving a timer', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Socket.prototype, 'connect').mockImplementation(function (this: Socket) {
+      return this;
+    });
+    const destroy = vi.spyOn(Socket.prototype, 'destroy');
+    const resultPromise = checkInfraConnection(target, 50);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(await resultPromise).toMatchObject({ reachable: false, errorCode: 'ETIMEDOUT' });
+    expect(destroy).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('uses SNMP, not TCP, for a network device and masks community errors', async () => {
+    const connect = vi.spyOn(Socket.prototype, 'connect');
+    const device = { ...target, protocol: 'snmp' as const, community: 'fixture-community' };
+    snmp.probe.mockResolvedValueOnce(undefined);
+    expect(await checkInfraConnection(device)).toMatchObject({
+      reachable: true,
+      check: 'snmp',
+      port: 161,
+    });
+    expect(snmp.probe).toHaveBeenCalledWith(device);
+    snmp.probe.mockRejectedValueOnce(new Error('fixture-community denied'));
+    const result = await checkInfraConnection(device);
+    expect(result).toMatchObject({
+      reachable: false,
+      check: 'snmp',
+      errorCode: 'SNMP_PROBE_FAILED',
+    });
+    expect(JSON.stringify(result)).not.toContain('fixture-community');
+    expect(connect).not.toHaveBeenCalled();
+  });
+});

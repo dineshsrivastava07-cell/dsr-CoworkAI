@@ -81,6 +81,19 @@ export interface GoogleConnectionStatus {
 
 export type InfraRcaProtocol = 'ssh' | 'winrm' | 'snmp' | 'db';
 
+export interface InfraRcaConnectionResult {
+  reachable: boolean;
+  latencyMs?: number;
+  error?: string;
+  check?: 'tcp' | 'snmp';
+  port?: number;
+  errorCode?: string;
+  nextSteps?: string[];
+  /** Read-only checks to run locally on the affected Windows computer. */
+  localChecks?: string[];
+  limitation?: string;
+}
+
 /** Public view of a configured target — name/protocol/host only, never secrets. */
 export interface InfraRcaTargetPublic {
   id: string;

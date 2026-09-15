@@ -47,6 +47,8 @@ Non-empty row values override shared values. For updates, omitted/blank optional
 
 Use the search field to filter the inventory by name, host, protocol or group; the UI displays 50 entries per page. The **Test** button checks TCP reachability for SSH, WinRM and databases, without verifying login or diagnostic privileges. For SNMP it sends a read-only request and requires a response.
 
+Failed checks show the error category, tested port and corrective steps. WinRM results include expandable read-only Windows checks and the adapter's authentication limits. The chat tool `infra_ping_check` shares the same protocol-aware check and marks failed readiness as a tool error. See [WinRM troubleshooting](IT-USER-GUIDE.md#winrm-host-unreachable-timeout-or-connection-refused) for host-down, timeout and refused-connection procedures.
+
 Example chat requests:
 
 > List the Mumbai-Production systems, continuing through every page. Do not run diagnostics yet.
