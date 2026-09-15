@@ -1,0 +1,45 @@
+[
+  {
+    "name": "qa-linux-001",
+    "protocol": "ssh",
+    "host": "192.0.2.11",
+    "port": 22,
+    "username": "svc_diagnostics",
+    "group": "QA-Linux"
+  },
+  {
+    "name": "qa-windows-001",
+    "protocol": "winrm",
+    "host": "192.0.2.21",
+    "port": 5985,
+    "username": "svc_diagnostics",
+    "group": "QA-Windows"
+  },
+  {
+    "name": "qa-switch-001",
+    "protocol": "snmp",
+    "host": "192.0.2.31",
+    "port": 161,
+    "group": "QA-Network"
+  },
+  {
+    "name": "qa-postgres-001",
+    "protocol": "db",
+    "host": "192.0.2.41",
+    "port": 5432,
+    "username": "svc_readonly",
+    "group": "QA-Databases",
+    "dbEngine": "postgres",
+    "dbName": "operations_test"
+  },
+  {
+    "name": "qa-mysql-001",
+    "protocol": "db",
+    "host": "192.0.2.42",
+    "port": 3306,
+    "username": "svc_readonly",
+    "group": "QA-Databases",
+    "dbEngine": "mysql",
+    "dbName": "operations_test"
+  }
+]

@@ -1,5 +1,7 @@
 # Infra RCA and RPA operating guide
 
+For the complete operator procedures, troubleshooting tables and test records, see the [step-by-step IT user guide](IT-USER-GUIDE.md). This page remains the shorter operating overview.
+
 ## Configure a large infrastructure inventory
 
 1. Open **Settings → MCP Connectors → Infra RCA**.

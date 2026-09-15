@@ -156,6 +156,8 @@ See [Architecture.md](./Architecture.md) for the full system design with flow di
 
 ## Verification
 
+For IT administrators and operators, start with the [step-by-step IT user guide](IT-USER-GUIDE.md). It covers RPA and Infra RCA settings, bulk inventories, troubleshooting, 23 acceptance tests, and [downloadable templates](user-guide-templates/).
+
 Run the local checks before publishing a build:
 
 ```bash
