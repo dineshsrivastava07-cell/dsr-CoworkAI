@@ -124,6 +124,14 @@ A provider without a saved API key shows as disabled in the switcher with a prom
 
 Go to **Settings -> General -> Autonomous Mode** to auto-approve tool calls that would otherwise show a permission dialog and wait up to 60 seconds for a click. This is most useful for scheduled/unattended tasks. It never overrides an explicit "deny" permission rule, and never bypasses tool-level irreversible-action confirmations (e.g. GUI_Operate's click-intent check before send/delete/purchase/pay/confirm actions).
 
+### Enable RPA / desktop automation
+
+1. Open **Settings → MCP Connectors → RPA / Desktop automation** and click **Enable RPA**. The bundled connector connects immediately; no API token is needed to enable it.
+2. Wait for **Connected** and the available tool count. On macOS, grant the app **Accessibility** and **Screen Recording** access in **System Settings → Privacy & Security** when prompted. Desktop automation supports macOS and Windows; vision-based actions require a configured vision-capable provider.
+3. Start a chat and ask **“List my saved RPA recipes.”** To create a workflow, ask the agent to record the steps while it performs them, then save the recipe under a name.
+
+Use **Disable RPA** in the same card to disconnect it. The choice persists across app restarts. If connection fails, the error is shown and the connector returns to disabled so you can correct the problem and retry. Existing tool permission rules still apply.
+
 ### Ollama Custom Models
 
 Edit **Settings -> API -> Ollama** and set any model tag pulled via `ollama pull <model>`.

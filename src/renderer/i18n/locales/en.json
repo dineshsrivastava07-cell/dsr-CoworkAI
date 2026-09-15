@@ -493,6 +493,17 @@
     "syncDetailFallback": "Falling back to direct access mode (less secure)",
     "syncDetailCompleted": "Synced {{count}} files"
   },
+  "rpa": {
+    "title": "RPA / Desktop automation",
+    "description": "Control desktop apps, capture screenshots, and record or replay reusable workflows with the bundled GUI_Operate connector.",
+    "enable": "Enable RPA",
+    "disable": "Disable RPA",
+    "disabled": "Disabled",
+    "connected": "Connected · {{count}} tools available",
+    "notConnected": "Enabled · not connected",
+    "permissions": "On macOS, allow the app in System Settings → Privacy & Security → Accessibility and Screen Recording when prompted. Desktop automation supports macOS and Windows. Vision-based actions also require a configured vision-capable provider.",
+    "tryIt": "After connecting, start a chat and ask: List my saved RPA recipes. To create a workflow, ask the agent to record the steps as it performs them. Tool permissions and irreversible-action confirmations still apply."
+  },
   "mcp": {
     "noConnectors": "No connectors configured",
     "addConnector": "Add a connector to enable MCP tools",

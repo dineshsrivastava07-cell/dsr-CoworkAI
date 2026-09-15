@@ -360,6 +360,19 @@ DVR/camera (ONVIF) support is intentionally not built — no vendor/model was sp
 
 ## RPA Recipes — Record Once, Replay Reliably
 
+RPA is opt-in through **Settings → MCP Connectors → RPA / Desktop automation → Enable RPA**. The card reuses an existing `GUI_Operate` configuration or creates the bundled preset, then saves through `mcp.saveServer`. The main process connects the server, discovers tools, and invalidates cached agent sessions. Disabling disconnects the connector; the saved disabled configuration persists across restarts. The card reports connection state and tool count, and refreshes the saved state after a connection failure.
+
+```mermaid
+flowchart LR
+    UI[Settings: Enable / Disable RPA] --> IPC[mcp.saveServer]
+    IPC --> STORE[MCP config store]
+    IPC --> MGR[MCPManager.updateServer]
+    MGR --> GUI[Bundled GUI_Operate server]
+    GUI --> STATUS[Connection status and tool discovery]
+    STATUS --> UI
+    IPC --> CACHE[Invalidate agent tool cache]
+```
+
 Five tools added to `GUI_Operate` turn its existing click/type/scroll/drag primitives into reusable automations for recurring tasks in any desktop app (ERP or otherwise): `start_recipe_recording`, `record_recipe_step`, `save_recipe`, `list_recipes`, `run_recipe`. Recipes are stored as JSON (name, target app, ordered steps) — no new SQLite table needed for this data volume.
 
 ```mermaid
@@ -374,13 +387,12 @@ flowchart TD
     RUN1 --> STEP{Next step}
     STEP -- click with\nelement_description --> RELOC[Re-locate via gui_locate_element\nvision lookup, not stale x/y]
     RELOC -- found --> EXEC3[Execute via the SAME\nclick/type_text/etc. handler]
-    RELOC -- not found --> FALLBACK[Fall back to recorded x/y]
-    FALLBACK --> EXEC3
+    RELOC -- not found --> STOP[Stop with relocation error]
     STEP -- other tool --> EXEC3
     EXEC3 --> STEP
 ```
 
-The actual reliability problem this solves: a step recorded against literal screen coordinates breaks the moment a window moves or resizes. Replay re-resolves each `click` step semantically via the existing vision-based element locator, using the step's saved description ("the Save button") — falling back to the recorded coordinates only if that fails. Replay reuses the exact same tool handlers as live use, so `GUI_Operate`'s existing safety checks (irreversible-click confirmation, emergency stop, app denylist) apply automatically to recipe steps with no extra code.
+Replay re-resolves each `click` step semantically via the existing vision-based element locator, using the step's saved description ("the Save button"). It stops if relocation fails. Replay reuses the same tool handlers as live use, so `GUI_Operate`'s existing safety checks (irreversible-click confirmation, emergency stop, app denylist) also apply to recipe steps.
 
 ---
 

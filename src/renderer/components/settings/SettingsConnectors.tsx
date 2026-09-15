@@ -17,6 +17,7 @@ import {
 import type { MCPServerConfig, MCPServerStatus, MCPToolInfo, MCPPreset } from './shared';
 import { SettingsGoogleWorkspace } from './SettingsGoogleWorkspace';
 import { SettingsInfraRCA } from './SettingsInfraRCA';
+import { SettingsRPA } from './SettingsRPA';
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
@@ -27,6 +28,7 @@ export function SettingsConnectors({ isActive }: { isActive: boolean }) {
     tRef.current = t;
   }, [t]);
   const [servers, setServers] = useState<MCPServerConfig[]>([]);
+  const [serversLoaded, setServersLoaded] = useState(false);
   const [statuses, setStatuses] = useState<MCPServerStatus[]>([]);
   const [tools, setTools] = useState<MCPToolInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -55,6 +57,7 @@ export function SettingsConnectors({ isActive }: { isActive: boolean }) {
     try {
       const loaded = (await window.electronAPI.mcp.getServers()) as MCPServerConfig[];
       setServers(loaded || []);
+      setServersLoaded(true);
       setError('');
     } catch (err) {
       console.error('Failed to load servers:', err);
@@ -153,6 +156,8 @@ export function SettingsConnectors({ isActive }: { isActive: boolean }) {
     try {
       const result = await window.electronAPI.mcp.saveServer(server);
       if (result && !result.success && result.error) {
+        // The main process disables a connector after a failed connection.
+        await loadAll();
         setError(result.error);
         // Keep form open so the user can see and act on the error
         return;
@@ -192,8 +197,30 @@ export function SettingsConnectors({ isActive }: { isActive: boolean }) {
     return tools.filter((t) => t.serverId === serverId);
   }
 
+  const rpaServer = servers.find((s) => s.name === 'GUI_Operate' || s.name === 'GUI Operate');
+  const rpaPreset = presets['gui-operate'];
+
+  async function handleToggleRPA() {
+    if (rpaServer) {
+      await handleToggleEnabled(rpaServer);
+    } else if (rpaPreset) {
+      await handleSaveServer({
+        ...rpaPreset,
+        id: 'mcp-gui-operate-builtin',
+        enabled: true,
+      });
+    }
+  }
+
   return (
     <div className="space-y-4">
+      <SettingsRPA
+        server={rpaServer}
+        status={rpaServer ? getServerStatus(rpaServer.id) : undefined}
+        toolCount={rpaServer ? getServerTools(rpaServer.id).length : 0}
+        isLoading={isLoading || !serversLoaded || (!rpaServer && !rpaPreset)}
+        onToggle={() => void handleToggleRPA()}
+      />
       <SettingsGoogleWorkspace isActive={isActive} />
       <SettingsInfraRCA isActive={isActive} />
 
