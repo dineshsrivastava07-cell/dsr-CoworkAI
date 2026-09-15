@@ -11,7 +11,9 @@ function portFor(target: Endpoint): number {
   return (
     target.port ||
     (target.protocol === 'winrm'
-      ? 5985
+      ? target.winrmTransport === 'https'
+        ? 5986
+        : 5985
       : target.protocol === 'ssh'
         ? 22
         : target.protocol === 'snmp'

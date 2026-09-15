@@ -77,6 +77,16 @@ describe('Infra RCA connection diagnostics', () => {
     expect(result.localChecks?.join('\n')).toContain('-LocalPort 12345');
   });
 
+  it('defaults WinRM HTTPS targets to the standard 5986 listener', () => {
+    const result = describeInfraConnectionFailure(
+      { code: 'ECONNREFUSED' },
+      { ...target, winrmTransport: 'https' }
+    );
+    expect(result.port).toBe(5986);
+    expect(result.localChecks?.join('\n')).toContain('-LocalPort 5986');
+    expect(result.limitation).toContain('over HTTPS');
+  });
+
   it('connects to a real TCP listener and detects refusal after that listener closes', async () => {
     const server = createServer((socket) => socket.end());
     await new Promise<void>((resolve, reject) => {
