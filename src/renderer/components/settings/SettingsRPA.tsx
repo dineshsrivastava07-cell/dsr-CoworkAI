@@ -1,6 +1,7 @@
 import { Monitor, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { MCPServerConfig, MCPServerStatus } from './shared';
+import { RpaWorkflowSetup } from './RpaWorkflowSetup';
 
 export function SettingsRPA({
   server,
@@ -57,6 +58,7 @@ export function SettingsRPA({
       </p>
       <p className="text-xs text-text-muted">{t('rpa.permissions')}</p>
       <p className="text-xs text-text-muted">{t('rpa.tryIt')}</p>
+      <RpaWorkflowSetup connected={enabled && status?.status === 'connected'} />
     </section>
   );
 }

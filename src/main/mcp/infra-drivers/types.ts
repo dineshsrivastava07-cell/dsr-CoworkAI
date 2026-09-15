@@ -46,6 +46,7 @@ export interface TargetCredentials {
   community?: string;
   dbEngine?: 'postgres' | 'mysql';
   dbName?: string;
+  group?: string;
 }
 
 export function worstStatus(metrics: DiagnosticMetric[]): MetricStatus {

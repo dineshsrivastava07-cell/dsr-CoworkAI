@@ -2199,7 +2199,7 @@ ipcMain.handle('config.getPublicPath', () => {
 // MCP Server IPC handlers
 ipcMain.handle('mcp.getServers', () => {
   try {
-    return mcpConfigStore.getServers();
+    return mcpConfigStore.getServersForSettings();
   } catch (error) {
     logError('[MCP] Error getting servers:', error);
     return [];
@@ -2370,11 +2370,32 @@ ipcMain.handle('google.disconnectAudience', async () => {
   return result;
 });
 
-// Infra RCA target CRUD — Infra_RCA is always enabled (force-pushed in
-// mcp-config-store.ts's getEnabledServers(), like Office_Tools), so unlike
-// Google Workspace there is no separate enable/disable toggle here. Secrets
-// are written directly to infra-rca-store.ts's encrypted file and never
-// echoed back to the renderer; only listTargets() (name/protocol/host) is.
+// Infra RCA target CRUD. Connector enablement is independent of target configuration.
+// Credentials enter the encrypted store and are never returned in previews or lists.
+ipcMain.handle(
+  'infraRca.previewImport',
+  (_event, input: Parameters<typeof infraRcaStore.importTargets>[0]) =>
+    infraRcaStore.importTargets(input)
+);
+ipcMain.handle(
+  'infraRca.importTargets',
+  (_event, input: Parameters<typeof infraRcaStore.importTargets>[0]) => {
+    try {
+      return infraRcaStore.importTargets(input, true);
+    } catch {
+      return {
+        success: false,
+        added: 0,
+        updated: 0,
+        skipped: 0,
+        total: 0,
+        errors: [],
+        preview: [],
+        error: 'Could not save the inventory. No successful import was confirmed.',
+      };
+    }
+  }
+);
 ipcMain.handle('infraRca.listTargets', () => {
   try {
     return infraRcaStore.listTargets();
@@ -2408,14 +2429,22 @@ ipcMain.handle('infraRca.deleteTarget', (_event, id: string) => {
 });
 
 ipcMain.handle('infraRca.testConnection', async (_event, id: string) => {
-  const targets = infraRcaStore.listTargets();
-  const match = targets.find((t) => t.id === id);
-  if (!match) {
-    return { reachable: false, error: 'Target not found.' };
-  }
-  const full = infraRcaStore.getTargetByName(match.name);
+  const full = infraRcaStore.getTargetById(id);
   if (!full) {
     return { reachable: false, error: 'Target not found.' };
+  }
+  if (full.protocol === 'snmp') {
+    const start = Date.now();
+    try {
+      const { probeSnmp } = await import('./mcp/infra-drivers/snmp-driver');
+      await probeSnmp(full);
+      return { reachable: true, latencyMs: Date.now() - start };
+    } catch {
+      return {
+        reachable: false,
+        error: 'SNMP probe failed. Check network access, UDP port and community.',
+      };
+    }
   }
   const defaultPort =
     full.protocol === 'ssh'

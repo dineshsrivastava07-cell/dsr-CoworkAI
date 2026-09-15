@@ -87,6 +87,7 @@ export interface InfraRcaTargetPublic {
   name: string;
   protocol: InfraRcaProtocol;
   host: string;
+  group?: string;
 }
 
 /** Renderer -> main payload for saving a target. Secrets flow one-way into the encrypted store and are never read back. */
@@ -103,6 +104,32 @@ export interface InfraRcaTargetInput {
   community?: string;
   dbEngine?: 'postgres' | 'mysql';
   dbName?: string;
+  group?: string;
+}
+
+export interface InfraRcaImportInput {
+  format: 'csv' | 'json';
+  content: string;
+  defaults?: Partial<Omit<InfraRcaTargetInput, 'id' | 'name' | 'host'>>;
+  duplicates: 'skip' | 'update';
+}
+
+export interface InfraRcaImportResult {
+  success: boolean;
+  added: number;
+  updated: number;
+  skipped: number;
+  total: number;
+  errors: Array<{ row: number; message: string }>;
+  preview: Array<{
+    row: number;
+    name: string;
+    host: string;
+    protocol: string;
+    group?: string;
+    action: 'add' | 'update' | 'skip';
+  }>;
+  error?: string;
 }
 
 // ---------------------------------------------------------------------------

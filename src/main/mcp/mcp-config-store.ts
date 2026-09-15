@@ -130,6 +130,13 @@ class MCPConfigStore {
     return this.store.get('servers', []);
   }
 
+  /** Show implicit built-ins as well as saved configs, so Settings matches runtime. */
+  getServersForSettings(): MCPServerConfig[] {
+    const saved = this.getServers();
+    const ids = new Set(saved.map((server) => server.id));
+    return [...saved, ...this.getEnabledServers().filter((server) => !ids.has(server.id))];
+  }
+
   /**
    * Get a specific server configuration
    */

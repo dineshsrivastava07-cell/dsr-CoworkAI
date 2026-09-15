@@ -199,6 +199,7 @@ export function SettingsConnectors({ isActive }: { isActive: boolean }) {
 
   const rpaServer = servers.find((s) => s.name === 'GUI_Operate' || s.name === 'GUI Operate');
   const rpaPreset = presets['gui-operate'];
+  const infraServer = servers.find((s) => s.name === 'Infra_RCA');
 
   async function handleToggleRPA() {
     if (rpaServer) {
@@ -214,6 +215,15 @@ export function SettingsConnectors({ isActive }: { isActive: boolean }) {
 
   return (
     <div className="space-y-4">
+      {error && (
+        <div
+          role="alert"
+          className="flex items-center gap-2 px-4 py-3 rounded-lg bg-error/10 text-error text-sm"
+        >
+          <AlertCircle className="w-4 h-4" />
+          {error}
+        </div>
+      )}
       <SettingsRPA
         server={rpaServer}
         status={rpaServer ? getServerStatus(rpaServer.id) : undefined}
@@ -222,14 +232,13 @@ export function SettingsConnectors({ isActive }: { isActive: boolean }) {
         onToggle={() => void handleToggleRPA()}
       />
       <SettingsGoogleWorkspace isActive={isActive} />
-      <SettingsInfraRCA isActive={isActive} />
-
-      {error && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-error/10 text-error text-sm">
-          <AlertCircle className="w-4 h-4" />
-          {error}
-        </div>
-      )}
+      <SettingsInfraRCA
+        isActive={isActive}
+        connector={infraServer}
+        connectorStatus={infraServer ? getServerStatus(infraServer.id) : undefined}
+        connectorBusy={isLoading || !serversLoaded}
+        onToggleConnector={() => (infraServer ? void handleToggleEnabled(infraServer) : undefined)}
+      />
 
       {/* Add/Edit Form */}
       {(showAddForm || editingServer) && (

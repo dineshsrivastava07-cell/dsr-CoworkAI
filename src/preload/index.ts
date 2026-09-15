@@ -35,6 +35,8 @@ import type {
   GoogleConnectionStatus,
   InfraRcaTargetPublic,
   InfraRcaTargetInput,
+  InfraRcaImportInput,
+  InfraRcaImportResult,
   RemoteConfig,
   GatewayConfig,
   PairedUser,
@@ -264,6 +266,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Infra RCA target methods — secrets never round-trip through these calls
   // beyond the initial save; listTargets only ever returns name/protocol/host.
   infraRca: {
+    previewImport: (input: InfraRcaImportInput): Promise<InfraRcaImportResult> =>
+      ipcRenderer.invoke('infraRca.previewImport', input),
+    importTargets: (input: InfraRcaImportInput): Promise<InfraRcaImportResult> =>
+      ipcRenderer.invoke('infraRca.importTargets', input),
     listTargets: (): Promise<InfraRcaTargetPublic[]> => ipcRenderer.invoke('infraRca.listTargets'),
     saveTarget: (
       target: InfraRcaTargetInput
@@ -587,6 +593,8 @@ declare global {
         disconnectAccount: () => Promise<{ success: boolean; error?: string }>;
       };
       infraRca: {
+        previewImport: (input: InfraRcaImportInput) => Promise<InfraRcaImportResult>;
+        importTargets: (input: InfraRcaImportInput) => Promise<InfraRcaImportResult>;
         listTargets: () => Promise<InfraRcaTargetPublic[]>;
         saveTarget: (
           target: InfraRcaTargetInput

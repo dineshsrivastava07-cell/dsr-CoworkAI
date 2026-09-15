@@ -6,12 +6,17 @@ import {
 } from '../utils/store-encryption';
 import { log, logWarn } from '../utils/logger';
 import type { TargetCredentials } from './infra-drivers/types';
+import type { InfraRcaImportInput, InfraRcaImportResult } from '../../shared/ipc-types';
+import { planInfraImport } from './infra-rca-import';
 
 interface InfraRcaStoreShape {
   targets: TargetCredentials[];
 }
 
-export type PublicTargetInfo = Pick<TargetCredentials, 'id' | 'name' | 'protocol' | 'host'>;
+export type PublicTargetInfo = Pick<
+  TargetCredentials,
+  'id' | 'name' | 'protocol' | 'host' | 'group'
+>;
 
 const defaults: InfraRcaStoreShape = { targets: [] };
 
@@ -47,7 +52,16 @@ class InfraRcaStore {
   listTargets(): PublicTargetInfo[] {
     return this.store
       .get('targets', [])
-      .map(({ id, name, protocol, host }) => ({ id, name, protocol, host }));
+      .map(({ id, name, protocol, host, group }) => ({ id, name, protocol, host, group }));
+  }
+
+  importTargets(input: InfraRcaImportInput, commit = false): InfraRcaImportResult {
+    const { result, nextTargets } = planInfraImport(input, this.store.get('targets', []));
+    if (commit && result.success && (result.added || result.updated)) {
+      // One encrypted write for the entire batch; validation never saves partial rows.
+      this.store.set('targets', nextTargets);
+    }
+    return result;
   }
 
   /** Full record including secrets — main-process use only (driver dispatch), never sent to the renderer or the model. */
@@ -55,9 +69,20 @@ class InfraRcaStore {
     return this.store.get('targets', []).find((t) => t.name === name);
   }
 
+  getTargetById(id: string): TargetCredentials | undefined {
+    return this.store.get('targets', []).find((t) => t.id === id);
+  }
+
   saveTarget(target: Omit<TargetCredentials, 'id'> & { id?: string }): TargetCredentials {
     const targets = this.store.get('targets', []);
     const id = target.id || randomUUID();
+    if (
+      targets.some(
+        (t) => t.id !== id && t.name.trim().toLowerCase() === target.name.trim().toLowerCase()
+      )
+    ) {
+      throw new Error('A target with this name already exists.');
+    }
     const existingIndex = targets.findIndex((t) => t.id === id);
     const saved: TargetCredentials = { ...target, id };
     if (existingIndex >= 0) {

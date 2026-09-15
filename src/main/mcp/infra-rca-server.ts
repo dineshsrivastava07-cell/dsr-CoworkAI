@@ -29,6 +29,7 @@ import { diagnoseWinrm, winrmExec } from './infra-drivers/winrm-driver';
 import { diagnoseSnmp } from './infra-drivers/snmp-driver';
 import { diagnoseDb, dbExecuteFix, dbQuery } from './infra-drivers/db-driver';
 import { diagnoseOnvif } from './infra-drivers/onvif-driver';
+import { selectInfraTargetPage } from './infra-target-page';
 
 const BROKER_PORT = process.env.INFRA_RCA_BROKER_PORT;
 const BROKER_SECRET = process.env.INFRA_RCA_BROKER_SECRET;
@@ -107,9 +108,11 @@ async function isTrustedApproval(proposalId: string): Promise<boolean> {
   return response.approved === true;
 }
 
-async function listTargetNames(): Promise<{ name: string; protocol: string; host: string }[]> {
+async function listTargetNames(): Promise<
+  { name: string; protocol: string; host: string; group?: string }[]
+> {
   const response = await brokerRequest<{
-    targets?: { name: string; protocol: string; host: string }[];
+    targets?: { name: string; protocol: string; host: string; group?: string }[];
   }>('/infra-rca/targets');
   return response.targets || [];
 }
@@ -217,8 +220,17 @@ function createMcpServer() {
         {
           name: 'infra_list_targets',
           description:
-            'List configured infrastructure targets (name, protocol, host only — no credentials). Call this first to see what you can diagnose.',
-          inputSchema: { type: 'object', properties: {}, required: [] },
+            'Search configured infrastructure targets without credentials. Returns a page plus total and nextOffset; use nextOffset to continue. Filter by group/site or search name, host and protocol before diagnosing large inventories.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              query: { type: 'string' },
+              group: { type: 'string' },
+              offset: { type: 'integer', minimum: 0 },
+              limit: { type: 'integer', minimum: 1, maximum: 100 },
+            },
+            required: [],
+          },
         },
         {
           name: 'infra_diagnose',
@@ -330,7 +342,11 @@ function createMcpServer() {
       switch (name) {
         case 'infra_list_targets': {
           const targets = await listTargetNames();
-          return { content: [{ type: 'text', text: JSON.stringify(targets, null, 2) }] };
+          return {
+            content: [
+              { type: 'text', text: JSON.stringify(selectInfraTargetPage(targets, args), null, 2) },
+            ],
+          };
         }
 
         case 'infra_diagnose': {

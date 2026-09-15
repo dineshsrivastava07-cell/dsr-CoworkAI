@@ -5,6 +5,8 @@ import type {
   InfraRcaTargetInput,
   InfraRcaTargetPublic,
 } from '../../../shared/ipc-types';
+import type { MCPServerConfig, MCPServerStatus } from './shared';
+import { InfraBulkImport } from './InfraBulkImport';
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
@@ -27,7 +29,19 @@ const emptyForm: InfraRcaTargetInput = {
   community: '',
 };
 
-export function SettingsInfraRCA({ isActive }: { isActive: boolean }) {
+export function SettingsInfraRCA({
+  isActive,
+  connector,
+  connectorStatus,
+  connectorBusy,
+  onToggleConnector,
+}: {
+  isActive: boolean;
+  connector?: MCPServerConfig;
+  connectorStatus?: MCPServerStatus;
+  connectorBusy?: boolean;
+  onToggleConnector?: () => void;
+}) {
   const [targets, setTargets] = useState<InfraRcaTargetPublic[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -38,6 +52,15 @@ export function SettingsInfraRCA({ isActive }: { isActive: boolean }) {
     Record<string, { reachable: boolean; error?: string; latencyMs?: number }>
   >({});
   const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(0);
+  const filteredTargets = targets.filter((target) =>
+    `${target.name} ${target.host} ${target.protocol} ${target.group || ''}`
+      .toLowerCase()
+      .includes(query.toLowerCase())
+  );
+  const lastPage = Math.max(0, Math.ceil(filteredTargets.length / 50) - 1);
+  const currentPage = Math.min(page, lastPage);
 
   const loadTargets = useCallback(async () => {
     if (!isElectron) return;
@@ -128,6 +151,30 @@ export function SettingsInfraRCA({ isActive }: { isActive: boolean }) {
         </div>
       </button>
 
+      <div className="flex items-center justify-between gap-3 px-4 pb-3 text-xs text-text-secondary">
+        <span role="status">
+          {!connector?.enabled
+            ? 'Disabled'
+            : connectorStatus?.status === 'connected'
+              ? `Connected · ${connectorStatus.toolCount} tools`
+              : connectorStatus?.status === 'failed'
+                ? 'Connection failed'
+                : 'Enabled · connecting / not connected'}
+        </span>
+        <button
+          type="button"
+          disabled={connectorBusy || !connector}
+          onClick={onToggleConnector}
+          className="px-3 py-1.5 rounded bg-accent text-white disabled:opacity-50"
+        >
+          {connectorBusy
+            ? 'Working…'
+            : connector?.enabled
+              ? 'Disable Infra RCA'
+              : 'Enable Infra RCA'}
+        </button>
+      </div>
+
       {expanded && (
         <div className="px-4 pb-4 space-y-4 border-t border-border-subtle pt-4">
           {error && (
@@ -138,13 +185,40 @@ export function SettingsInfraRCA({ isActive }: { isActive: boolean }) {
           )}
 
           <p className="text-xs text-text-muted">
-            Diagnostics (health checks) run automatically. Any proposed fix always requires your
+            Configure targets here, then request diagnostics in chat. Any proposed fix requires your
             explicit approval in the conversation before it executes — nothing here is ever
             auto-applied.
           </p>
 
+          <InfraBulkImport onImported={loadTargets} />
+          <label className="block text-xs text-text-secondary">
+            Search systems by name, host, protocol or group
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setPage(0);
+              }}
+              className="w-full mt-1 px-3 py-2 rounded bg-background border border-border text-text-primary"
+            />
+          </label>
+          <div className="flex justify-between items-center text-xs text-text-secondary">
+            <span>
+              {filteredTargets.length} matching systems · page {currentPage + 1} of {lastPage + 1}
+            </span>
+            <div className="flex gap-2">
+              <button disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+                Previous
+              </button>
+              <button disabled={currentPage === lastPage} onClick={() => setPage(currentPage + 1)}>
+                Next
+              </button>
+            </div>
+          </div>
+
           <div className="space-y-2">
-            {targets.map((target) => {
+            {filteredTargets.slice(currentPage * 50, (currentPage + 1) * 50).map((target) => {
               const testResult = testResults[target.id];
               return (
                 <div
@@ -154,7 +228,8 @@ export function SettingsInfraRCA({ isActive }: { isActive: boolean }) {
                   <div>
                     <div className="text-sm font-medium text-text-primary">{target.name}</div>
                     <div className="text-xs text-text-muted">
-                      {PROTOCOL_LABELS[target.protocol]} · {target.host}
+                      {PROTOCOL_LABELS[target.protocol]} · {target.host}{' '}
+                      {target.group ? `· ${target.group}` : ''}
                     </div>
                     {testResult && (
                       <div
@@ -162,7 +237,11 @@ export function SettingsInfraRCA({ isActive }: { isActive: boolean }) {
                       >
                         {testResult.reachable ? (
                           <>
-                            <CheckCircle className="w-3 h-3" /> Reachable ({testResult.latencyMs}ms)
+                            <CheckCircle className="w-3 h-3" />{' '}
+                            {target.protocol === 'snmp'
+                              ? 'SNMP responded'
+                              : 'TCP reachable (login not tested)'}{' '}
+                            ({testResult.latencyMs}ms)
                           </>
                         ) : (
                           <>

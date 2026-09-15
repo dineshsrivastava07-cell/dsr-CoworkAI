@@ -54,6 +54,21 @@ function snmpGet(session: snmp.Session, oids: string[]): Promise<snmp.Varbind[]>
   });
 }
 
+/** A read-only UDP request; a TCP port probe cannot validate SNMP. */
+export async function probeSnmp(target: TargetCredentials): Promise<void> {
+  const session = createSession(target);
+  try {
+    const values = await snmpGet(session, [OID.sysDescr]);
+    if (!values.length || values.some((value) => snmp.isVarbindError(value))) {
+      throw new Error(
+        'SNMP agent did not return system information. Check the community and access policy.'
+      );
+    }
+  } finally {
+    session.close();
+  }
+}
+
 function snmpTable(session: snmp.Session, oid: string): Promise<RawTable> {
   return new Promise((resolve, reject) => {
     session.table(oid, (error, table) => {

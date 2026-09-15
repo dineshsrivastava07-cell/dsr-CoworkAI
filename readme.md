@@ -132,6 +132,18 @@ Go to **Settings -> General -> Autonomous Mode** to auto-approve tool calls that
 
 Use **Disable RPA** in the same card to disconnect it. The choice persists across app restarts. If connection fails, the error is shown and the connector returns to disabled so you can correct the problem and retry. Existing tool permission rules still apply.
 
+Expand **Configure a business workflow** to enter the application type, application/URL, inputs, business steps and expected result. **Prepare instructions** creates a reviewable brief; **Review setup in chat** starts a conversation to plan and supervise setup. This does not itself create an executable recipe or validate a business process. Desktop recipes are recorded and replayed through the existing chat tools. Web applications should use configured browser tools when available; desktop recipes do not capture browser-tool/API calls.
+
+### Bulk infrastructure configuration
+
+Open **Settings → MCP Connectors → Infra RCA**. Its Enable/Disable control and connection state now match the saved connector configuration, including implicit built-ins. A previously saved disabled connector remains disabled until you enable it.
+
+Expand **Bulk import systems (CSV / JSON)**, download the CSV template, and upload an inventory of up to **10,000 systems / 5 MB per batch**. Export Excel workbooks as **CSV UTF-8** first. Enter shared credentials once per batch, choose whether to skip or update matching names, then **Validate inventory → Import validated systems**. Any invalid row prevents the entire batch from being saved. Credentials go into the existing encrypted target store; previews and model-facing lists contain no credential fields.
+
+Search and page through systems by name, host, protocol or group/site. The agent's `infra_list_targets` tool also supports `query`, `group`, `offset` and `limit` so large inventories are not silently truncated. Import registers targets; it does not run a fleet-wide network scan.
+
+See the [Infra RCA and RPA operating guide](INFRA-RPA-OPERATIONS.md) for templates, credential updates, setup steps, accuracy checks and current execution limits.
+
 ### Ollama Custom Models
 
 Edit **Settings -> API -> Ollama** and set any model tag pulled via `ollama pull <model>`.

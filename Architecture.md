@@ -322,7 +322,21 @@ Unattended/scheduled sessions previously stalled on the same 60-second permissio
 
 ## Infra RCA — Remote Infrastructure Diagnostics
 
-`Infra_RCA` is a bundled, always-enabled MCP server that diagnoses remote systems — Linux/Unix servers (SSH), Windows servers (WinRM/PowerShell, best-effort), network gear/printers/UPS (SNMP via standard IETF MIBs), and Postgres/MySQL (direct connection) — and proposes fixes, but **never auto-executes one**. Credentials for each named target live in a dedicated encrypted store and are resolved by the MCP server child process on demand via a loopback broker in the main process (the same pattern `Google_Workspace` uses for OAuth tokens) — they never appear in the model's context.
+`Infra_RCA` is a bundled MCP server that diagnoses remote systems — Linux/Unix servers (SSH), Windows servers (WinRM/PowerShell, best-effort), network gear/printers/UPS (SNMP via standard IETF MIBs), and Postgres/MySQL (direct connection) — and proposes fixes. It is implicitly enabled when no saved configuration exists; an explicitly disabled configuration takes precedence. Settings displays this effective configuration and provides an Enable/Disable control. Credentials for each named target live in a dedicated encrypted store and are resolved by the MCP server child process on demand via a loopback broker in the main process — they never appear in the model's context.
+
+Bulk import accepts CSV or a JSON array, validates up to 10,000 records with shared batch defaults, and plans case-insensitive name matches. Preview returns only public fields and row errors. Commit revalidates against current storage and writes the entire resulting array once; any invalid record prevents a write. Existing IDs and omitted credentials survive updates, and changing an existing target's host/protocol requires a new target name. The UI pages 50 targets at a time; `infra_list_targets` returns a filtered page with a continuation offset. This is inventory onboarding, not a distributed monitoring or RPA-worker service.
+
+```mermaid
+flowchart LR
+    FILE[CSV / JSON inventory + shared defaults] --> PREVIEW[Validate and preview public fields]
+    PREVIEW --> CHECK{Every row valid?}
+    CHECK -- No --> ERR[Show errors; save nothing]
+    CHECK -- Yes --> COMMIT[User imports; revalidate current inventory]
+    COMMIT --> STORE[One encrypted store write]
+    STORE --> UI[Search and page in Settings]
+    STORE --> BROKER[Authenticated local broker]
+    BROKER --> LIST[infra_list_targets: query / group / nextOffset]
+```
 
 ```mermaid
 flowchart TD
@@ -361,6 +375,8 @@ DVR/camera (ONVIF) support is intentionally not built — no vendor/model was sp
 ## RPA Recipes — Record Once, Replay Reliably
 
 RPA is opt-in through **Settings → MCP Connectors → RPA / Desktop automation → Enable RPA**. The card reuses an existing `GUI_Operate` configuration or creates the bundled preset, then saves through `mcp.saveServer`. The main process connects the server, discovers tools, and invalidates cached agent sessions. Disabling disconnects the connector; the saved disabled configuration persists across restarts. The card reports connection state and tool count, and refreshes the saved state after a connection failure.
+
+`RpaWorkflowSetup` collects a business brief and `buildRpaWorkflowPrompt` translates it into a review request carrying inputs, steps and application-level success checks. **Review setup in chat** uses the existing `useIPC.startSession` path. It is a planning handoff: no recipe is saved and no domain is certified by completing the form. The agent records supported desktop primitives only after supervised setup; browser/API workflows use their respective tools. Instructions to verify outputs are distinct from enforced recipe-engine postconditions and live acceptance evidence.
 
 ```mermaid
 flowchart LR

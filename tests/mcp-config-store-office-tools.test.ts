@@ -83,4 +83,23 @@ describe('MCPConfigStore Office Tools defaults', () => {
     expect(infraRca?.args?.[0]).toContain('infra-rca-server');
     expect(infraRca?.args?.[0]).not.toBe('{INFRA_RCA_SERVER_PATH}');
   });
+
+  it('shows the same implicit Infra connector in Settings that is enabled at runtime', () => {
+    const shown = mcpConfigStore.getServersForSettings().find((s) => s.name === 'Infra_RCA');
+    expect(shown).toEqual(mcpConfigStore.getEnabledServers().find((s) => s.name === 'Infra_RCA'));
+    expect(mcpConfigStore.getServers()).toEqual([]);
+  });
+
+  it('keeps a disabled Infra configuration visible without creating a second enabled one', () => {
+    const server = mcpConfigStore.createFromPreset('infra-rca', false)!;
+    mcpConfigStore.saveServer(server);
+    expect(mcpConfigStore.getServersForSettings().filter((s) => s.name === 'Infra_RCA')).toEqual([
+      server,
+    ]);
+    expect(mcpConfigStore.getEnabledServers().some((s) => s.name === 'Infra_RCA')).toBe(false);
+    mcpConfigStore.saveServer({ ...server, enabled: true });
+    expect(mcpConfigStore.getEnabledServers().filter((s) => s.name === 'Infra_RCA')).toEqual([
+      { ...server, enabled: true },
+    ]);
+  });
 });
