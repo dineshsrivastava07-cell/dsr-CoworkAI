@@ -17,7 +17,12 @@ import { getSharedAuthStorage, ModelRegistry } from './shared-auth';
 import { MCPManager } from '../mcp/mcp-manager';
 import { configStore } from '../config/config-store';
 import { log, logError } from '../utils/logger';
-import { resolvePiRegistryModel, resolvePiRouteProtocol } from './pi-model-resolution';
+import {
+  buildSyntheticPiModel,
+  resolvePiRegistryModel,
+  resolvePiRouteProtocol,
+  resolveSyntheticPiModelFallback,
+} from './pi-model-resolution';
 import type { ServerEvent } from '../../renderer/types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -119,7 +124,8 @@ function createSpawnSubagentTool(
   parentSessionId: string,
   requestPermission: PermissionHandler | null,
   getParentAbortSignal: () => AbortSignal | null,
-  concurrencyState: { active: number }
+  concurrencyState: { active: number },
+  parentCwd: string
 ): AgentRuntimeCustomTool {
   return {
     name: 'spawn_subagent',
@@ -235,22 +241,43 @@ function createSpawnSubagentTool(
 
         const modelString = config.model?.trim() || 'anthropic/claude-sonnet-4-6';
         const configProtocol = resolvePiRouteProtocol(config.provider, config.customProtocol);
-        const piModel = resolvePiRegistryModel(modelString, {
+        let piModel = resolvePiRegistryModel(modelString, {
           configProvider: configProtocol,
           customBaseUrl: config.baseUrl?.trim() || undefined,
           rawProvider: config.provider,
           customProtocol: config.customProtocol,
         });
         if (!piModel) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: 'Error: could not resolve model for subagent. Check provider/model config.',
-              },
-            ],
-            details: undefined as unknown,
-          };
+          if (
+            !['ollama', 'custom', 'openai', 'openai-compatible'].includes(config.provider || '')
+          ) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: 'Error: could not resolve model for subagent. Check provider/model config.',
+                },
+              ],
+              details: undefined as unknown,
+            };
+          }
+          const fallback = resolveSyntheticPiModelFallback({
+            rawModel: config.model,
+            resolvedModelString: modelString,
+            rawProvider: config.provider,
+            routeProtocol: configProtocol,
+            baseUrl: config.baseUrl?.trim() || undefined,
+          });
+          piModel = buildSyntheticPiModel(
+            fallback.modelId,
+            fallback.provider,
+            configProtocol,
+            config.baseUrl?.trim() || undefined,
+            undefined,
+            undefined,
+            config.contextWindow,
+            config.maxTokens
+          );
         }
 
         // Build MCP tools (minus spawn_subagent)
@@ -266,28 +293,50 @@ function createSpawnSubagentTool(
               label: `${mcpTool.serverName} → ${mcpTool.originalName || mcpTool.name}`,
               description: mcpTool.description || `MCP tool from ${mcpTool.serverName}`,
               parameters,
-              async execute(_id: string, p: unknown) {
+              async execute(_id: string, p: unknown, signal?: AbortSignal) {
+                signal?.throwIfAborted();
                 const result = await mcpManager.callTool(
                   mcpTool.name,
                   p as Record<string, unknown>
                 );
-                const resultContent = (
-                  result as { content?: Array<{ type: string; text?: string }> }
-                )?.content;
-                const text =
-                  resultContent?.map((c) => (c.type === 'text' ? c.text : '')).join('') || '';
-                return { content: [{ type: 'text' as const, text }], details: undefined };
+                signal?.throwIfAborted();
+                const typed = result as {
+                  content?: Array<{
+                    type: string;
+                    text?: string;
+                    data?: string;
+                    mimeType?: string;
+                  }>;
+                  isError?: boolean;
+                };
+                const content = typed.content || [];
+                const text = content
+                  .filter((c) => c.type === 'text')
+                  .map((c) => c.text || '')
+                  .join('');
+                const images = content
+                  .filter((c) => c.type === 'image' && c.data)
+                  .map((c) => ({
+                    type: 'image' as const,
+                    data: c.data!,
+                    mimeType: c.mimeType || 'image/png',
+                  }));
+                if (typed.isError) throw new Error(text || 'MCP tool failed');
+                return {
+                  content: [{ type: 'text' as const, text }, ...images],
+                  details: undefined,
+                };
               },
             } as ToolDefinition;
           });
         }
 
-        if (allowed_tools && allowed_tools.length > 0) {
+        if (Array.isArray(allowed_tools)) {
           const allowSet = new Set(allowed_tools);
           mcpCustomTools = mcpCustomTools.filter((t) => allowSet.has(t.name));
         }
 
-        const cwd = config.defaultWorkdir || process.cwd();
+        const cwd = parentCwd;
         const codingTools = createCodingTools(cwd);
 
         const childSystemPrompt = buildChildSystemPrompt(task, result_format, role);
@@ -314,22 +363,32 @@ function createSpawnSubagentTool(
 
         // Install permission gating on child session (mirrors parent behavior)
         if (requestPermission) {
-          const piSession = childSession as unknown as {
-            setBeforeToolCall?: (
-              hook: (call: {
-                toolName: string;
-                args: unknown;
-              }) => Promise<{ block: boolean; reason?: string } | void>
-            ) => void;
-          };
-          if (typeof piSession.setBeforeToolCall === 'function') {
-            piSession.setBeforeToolCall(async (call) => {
-              const decision = await requestPermission(call.toolName, call.args);
-              if (decision === 'deny') {
-                return { block: true, reason: 'Permission denied by parent session policy' };
+          type BeforeToolHook = (
+            call: { toolCall?: { name?: string }; args?: unknown },
+            signal?: AbortSignal
+          ) => Promise<unknown> | unknown;
+          const agent = (
+            childSession as unknown as {
+              agent?: {
+                setBeforeToolCall?: (hook: BeforeToolHook) => void;
+                _beforeToolCall?: BeforeToolHook;
+              };
+            }
+          ).agent;
+          if (agent && typeof agent.setBeforeToolCall === 'function') {
+            const original = agent._beforeToolCall;
+            agent.setBeforeToolCall(
+              async (
+                call: { toolCall?: { name?: string }; args?: unknown },
+                signal?: AbortSignal
+              ) => {
+                const decision = await requestPermission(call.toolCall?.name || '', call.args);
+                if (decision === 'deny') {
+                  return { block: true, reason: 'Permission denied by parent session policy' };
+                }
+                return original ? original(call, signal) : undefined;
               }
-              return undefined;
-            });
+            );
           } else {
             logError(
               '[SubagentExtension] Child session does not support setBeforeToolCall — permission gating disabled'
@@ -456,7 +515,16 @@ function createSpawnSubagentTool(
           content: [
             { type: 'text' as const, text: finalText || '(subagent produced no text output)' },
           ],
-          details: undefined as unknown,
+          details: {
+            status: finalText ? 'completed' : 'failed',
+            artifacts: [],
+            sourceReferences: [],
+            verification: { status: finalText ? 'not_run' : 'failed' },
+            warnings: finalText
+              ? ['Child returned free-form output; no artifact manifest was supplied.']
+              : ['No child output was produced.'],
+            usage: { durationMs },
+          },
         };
       } catch (err: unknown) {
         const durationMs = Date.now() - startTime;
@@ -486,7 +554,14 @@ function createSpawnSubagentTool(
                   : `Subagent error: ${message}`,
             },
           ],
-          details: undefined as unknown,
+          details: {
+            status: isCancelled ? 'cancelled' : isTimeout ? 'timed_out' : 'failed',
+            artifacts: [],
+            sourceReferences: [],
+            verification: { status: 'failed' },
+            warnings: [message.slice(0, 500)],
+            usage: { durationMs },
+          },
         };
       } finally {
         concurrencyState.active--;
@@ -515,7 +590,8 @@ export class SubagentExtension implements AgentRuntimeExtension {
           context.session.id,
           this.requestPermission,
           this.getParentAbortSignal,
-          this.concurrencyState
+          this.concurrencyState,
+          context.session.cwd || configStore.get('defaultWorkdir') || process.cwd()
         ),
       ],
     };

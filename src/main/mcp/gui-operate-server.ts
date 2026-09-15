@@ -7198,9 +7198,8 @@ function createMcpServer(): Server {
                 );
                 stepArgs = { ...stepArgs, x: located.x, y: located.y };
               } catch (locateError: unknown) {
-                writeMCPLog(
-                  `[run_recipe] Semantic relocation failed for step ${i + 1} ("${step.elementDescription}"), falling back to recorded coordinates: ${locateError instanceof Error ? locateError.message : String(locateError)}`,
-                  'Recipe Replay Warning'
+                throw new Error(
+                  `Recipe "${recipe_name}" could not relocate step ${i + 1} ("${step.elementDescription}"): ${locateError instanceof Error ? locateError.message : String(locateError)}`
                 );
               }
             }

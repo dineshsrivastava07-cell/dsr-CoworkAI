@@ -61,6 +61,7 @@ import { buildScheduledTaskTitle } from '../../shared/schedule/task-title';
 interface AgentRunner {
   run(session: Session, prompt: string, existingMessages: Message[]): Promise<void>;
   cancel(sessionId: string): void;
+  getAbortSignal?(sessionId: string): AbortSignal | null;
   clearSdkSession?(sessionId: string): void;
   clearAllSdkSessions?(): void;
   compact?(
@@ -178,6 +179,10 @@ export class SessionManager {
    */
   markSessionScheduled(sessionId: string): void {
     this.scheduledSessionIds.add(sessionId);
+  }
+
+  getAgentAbortSignal(sessionId: string): AbortSignal | null {
+    return this.agentRunner.getAbortSignal?.(sessionId) || null;
   }
 
   /**

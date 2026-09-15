@@ -174,34 +174,30 @@ export function createEncryptedStoreWithKeyRotation<T extends Record<string, unk
         const snapshot = legacyStore.store as T;
         const storePath = legacyStore.path;
 
-        // Write the new store with the stable key FIRST so data is safe on disk
-        // before we touch the old file. If the process crashes after this point,
-        // the new store already holds all data and will be used on next startup.
-        const stableStore = new Store<T>({
-          ...(options.storeOptions as StoreOptions<T>),
-          encryptionKey: stableKey,
-        });
-        stableStore.store = snapshot;
-
-        // Now that the new store is safely written, back up the old file.
-        // electron-store may have already replaced it when we opened stableStore
-        // above, so we only move it if it still exists.
-        if (fs.existsSync(storePath)) {
-          const backupPath = buildBackupPath(storePath);
-          try {
-            fs.renameSync(storePath, backupPath);
-          } catch {
-            // renameSync can fail across devices; fall back to copy + delete.
-            fs.copyFileSync(storePath, backupPath);
-            fs.unlinkSync(storePath);
+        // Stage on the same filesystem. Never open the legacy ciphertext with the
+        // new key or remove the active file before its replacement is verified.
+        const stagingDir = fs.mkdtempSync(path.join(path.dirname(storePath), '.key-rotation-'));
+        try {
+          const stagedOptions = {
+            ...options.storeOptions,
+            cwd: stagingDir,
+            encryptionKey: stableKey,
+          };
+          const staged = new Store<T>(stagedOptions);
+          staged.store = snapshot;
+          const verified = new Store<T>(stagedOptions);
+          if (JSON.stringify(verified.store) !== JSON.stringify(snapshot)) {
+            throw new Error('Encrypted store migration verification failed');
           }
-          options.log?.(`${options.logPrefix} Migrating encrypted store to a stable key`, {
-            storePath,
-            backupPath,
-          });
+          const backupPath = buildBackupPath(storePath);
+          fs.copyFileSync(storePath, backupPath, fs.constants.COPYFILE_EXCL);
+          fs.chmodSync(backupPath, 0o600);
+          fs.renameSync(staged.path, storePath);
+          options.log?.(`${options.logPrefix} Migrated encrypted store`, { storePath, backupPath });
+          return new Store<T>({ ...options.storeOptions, encryptionKey: stableKey });
+        } finally {
+          fs.rmSync(stagingDir, { recursive: true, force: true });
         }
-
-        return stableStore;
       } catch (legacyError) {
         if (!isLikelyKeyMismatch(legacyError)) {
           throw legacyError;

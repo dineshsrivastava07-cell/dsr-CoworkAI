@@ -77,6 +77,7 @@ function sanitizeRules(input: unknown): PermissionRule[] | null {
 export function setPermissionRules(next: unknown): void {
   const sanitized = sanitizeRules(next);
   rules = sanitized && sanitized.length > 0 ? sanitized : [...DEFAULT_RULES];
+  alwaysAllowBySession.clear();
 }
 
 export function getPermissionRules(): PermissionRule[] {
@@ -106,10 +107,19 @@ export function decidePermission(
 ): 'allow' | 'deny' | 'ask' {
   const lowered = toolName.toLowerCase();
 
+  const inputStr = safeStringify(input);
+  if (
+    rules.some(
+      (rule) =>
+        rule.action === 'deny' &&
+        rule.tool.toLowerCase() === lowered &&
+        (!rule.pattern || matchesPattern(rule.pattern, inputStr))
+    )
+  )
+    return 'deny';
+
   const session = alwaysAllowBySession.get(sessionId);
   if (session?.has(lowered)) return 'allow';
-
-  const inputStr = safeStringify(input);
 
   for (const rule of rules) {
     if (rule.tool.toLowerCase() !== lowered) continue;

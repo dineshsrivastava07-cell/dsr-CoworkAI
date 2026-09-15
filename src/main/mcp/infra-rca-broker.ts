@@ -23,6 +23,7 @@ interface BrokerState {
 }
 
 let brokerState: BrokerState | null = null;
+const approvedInfraFixes = new Map<string, number>();
 
 function json(res: http.ServerResponse, status: number, body: Record<string, unknown>): void {
   const payload = JSON.stringify(body);
@@ -70,6 +71,15 @@ export function createInfraRcaBrokerRequestHandler(
         return;
       }
 
+      if (req.method === 'GET' && url.pathname === '/infra-rca/approval') {
+        const proposalId = url.searchParams.get('proposal_id') || '';
+        const approvedAt = approvedInfraFixes.get(proposalId);
+        json(res, 200, {
+          approved: Boolean(approvedAt && Date.now() - approvedAt < 15 * 60 * 1000),
+        });
+        return;
+      }
+
       json(res, 404, { error: 'not_found' });
     } catch (error) {
       logError('[InfraRcaBroker] Unexpected error:', error);
@@ -78,6 +88,10 @@ export function createInfraRcaBrokerRequestHandler(
       }
     }
   };
+}
+
+export function approveInfraFix(proposalId: string): void {
+  if (proposalId.trim()) approvedInfraFixes.set(proposalId.trim(), Date.now());
 }
 
 export async function startInfraRcaBroker(): Promise<{ port: number }> {

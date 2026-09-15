@@ -179,6 +179,11 @@ function resolveSubagentToolPermission(
   if (SUBAGENT_ALWAYS_DENIED_TOOLS.has(toolName)) {
     return 'deny';
   }
+  // A delegated worker cannot satisfy the trusted approval required for an
+  // infrastructure fix. Keep this gated even when autonomous mode is on.
+  if (toolName.endsWith('infra_execute_fix')) {
+    return 'deny';
+  }
   const decision = decidePermission('subagent', toolName, toolInput);
   return decision === 'deny' ? 'deny' : 'allow';
 }
@@ -1000,7 +1005,8 @@ app
           () => sessionManager?.getMCPManager() ?? null,
           sendToRenderer,
           async (toolName, toolInput) =>
-            resolveSubagentToolPermission(toolName, toolInput as Record<string, unknown>)
+            resolveSubagentToolPermission(toolName, toolInput as Record<string, unknown>),
+          () => sessionManager?.getAgentAbortSignal('headless') ?? null
         ),
       ]);
 
@@ -1392,7 +1398,8 @@ app
         () => sessionManager?.getMCPManager() ?? null,
         sendToRenderer,
         async (toolName, toolInput) =>
-          resolveSubagentToolPermission(toolName, toolInput as Record<string, unknown>)
+          resolveSubagentToolPermission(toolName, toolInput as Record<string, unknown>),
+        () => sessionManager?.getAgentAbortSignal('interactive') ?? null
       ),
     ]);
 

@@ -96,6 +96,10 @@ async function createExcel(params: CreateExcelParams): Promise<string> {
   const wb = new ExcelJS.default.Workbook();
   wb.creator = 'V-Coworker';
   wb.created = new Date();
+  // ExcelJS writes formulas but does not evaluate them. Ask supported
+  // spreadsheet engines to recalculate on open and keep formula-only columns
+  // in totals below.
+  wb.calcProperties.fullCalcOnLoad = true;
 
   const outDir = params.output_dir || defaultOutputDir();
   await ensureDir(outDir);
@@ -168,7 +172,9 @@ async function createExcel(params: CreateExcelParams): Promise<string> {
       const totalsRow: (string | { formula: string })[] = [];
 
       for (let c = 0; c < numCols; c++) {
-        const hasNumbers = sheetDef.rows.some((r) => typeof r[c] === 'number');
+        const hasNumbers = sheetDef.rows.some(
+          (r) => typeof r[c] === 'number' || isExcelFormulaCell(r[c])
+        );
         if (hasNumbers) {
           const colLetter = ws.getColumn(c + 1).letter;
           totalsRow.push({ formula: `SUM(${colLetter}${dataStart}:${colLetter}${dataEnd})` });
@@ -1809,7 +1815,6 @@ interface GanttTask {
 // Caps the number of day-columns rendered, in case the model returns an
 // unrealistically wide date range — keeps the sheet usable instead of
 // generating hundreds of near-empty columns.
-const MAX_GANTT_DAYS = 180;
 
 async function generateGanttRoadmapFromDescription(
   desc: string,
@@ -1881,11 +1886,7 @@ Use realistic sequential dates, at least 5 tasks, end_date must be on or after s
   ]);
 
   const minStart = new Date(Math.min(...tasks.map((t) => t.start.getTime())));
-  let maxEnd = new Date(Math.max(...tasks.map((t) => t.end.getTime())));
-  const totalDays = Math.round((maxEnd.getTime() - minStart.getTime()) / 86_400_000) + 1;
-  if (totalDays > MAX_GANTT_DAYS) {
-    maxEnd = new Date(minStart.getTime() + (MAX_GANTT_DAYS - 1) * 86_400_000);
-  }
+  const maxEnd = new Date(Math.max(...tasks.map((t) => t.end.getTime())));
 
   const headerDates: Date[] = [];
   for (
@@ -2667,8 +2668,19 @@ function createMcpServer() {
                       description: 'Block type',
                     },
                     heading: {
-                      type: 'string',
-                      description: 'Optional section heading text to show before this block',
+                      oneOf: [
+                        { type: 'string' },
+                        {
+                          type: 'object',
+                          properties: {
+                            text: { type: 'string' },
+                            heading_level: { type: 'number', enum: [1, 2, 3] },
+                          },
+                          required: ['text'],
+                        },
+                      ],
+                      description:
+                        'Optional section heading text; object form with text/heading_level is also accepted.',
                     },
                     heading_level: {
                       type: 'number',
@@ -2964,7 +2976,24 @@ function createMcpServer() {
             if (raw.output_dir) params.output_dir = raw.output_dir;
             if (raw.author && !params.author) params.author = raw.author;
           } else {
-            params = raw as unknown as CreateWordParams;
+            params = {
+              ...raw,
+              blocks: raw.blocks.map((block) => {
+                const value = block as unknown as { heading?: unknown; heading_level?: number };
+                if (value.heading && typeof value.heading === 'object') {
+                  const heading = value.heading as { text?: unknown; heading_level?: unknown };
+                  return {
+                    ...block,
+                    heading: typeof heading.text === 'string' ? heading.text : undefined,
+                    heading_level: Number(heading.heading_level || value.heading_level || 1) as
+                      | 1
+                      | 2
+                      | 3,
+                  };
+                }
+                return block;
+              }),
+            } as CreateWordParams;
           }
           const outPath = await createWordDocument(params);
           return {

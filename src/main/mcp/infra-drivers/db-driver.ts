@@ -140,28 +140,116 @@ export async function diagnoseDb(
   };
 }
 
-/**
- * Rejects anything but a single read-only statement. Deliberately simple (not a
- * full SQL parser) — good enough to stop the obvious cases (writes, DDL,
- * statement-stacking) for a tool that's auto-allowed without human confirmation;
- * anything that actually mutates data still has to go through the gated
- * infra_propose_fix / infra_execute_fix flow.
- */
+/** Conservative syntax screening; the database read-only transaction is the enforcement boundary. */
 export function assertReadOnlySelect(sql: string): void {
-  const trimmed = sql.trim().replace(/;\s*$/, '');
-  if (trimmed.includes(';')) {
-    throw new Error('infra_query_db only accepts a single statement — remove the extra ";".');
-  }
-  if (!/^\s*(select|with|show|explain|describe|desc)\b/i.test(trimmed)) {
+  if (typeof sql !== 'string' || sql.length > 100_000) throw new Error('Invalid or oversized SQL');
+  // Strip string/identifier literals before inspecting tokens. Executable MySQL
+  // comments and dollar-quoted expressions are deliberately unsupported.
+  if (/\/\*!|\$[a-z_]*\$/i.test(sql))
+    throw new Error('Executable comments/dollar quoting are unsupported');
+  const statement = sql.trim().replace(/;\s*$/, '');
+  const tokens = statement
+    .replace(/'(?:''|[^'])*'|"(?:""|[^"])*"|`[^`]*`/g, ' literal ')
+    .replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ' ');
+  if (
+    tokens.includes(';') ||
+    !/^\s*(select|with|show|explain|describe|desc)\b/i.test(tokens) ||
+    /\b(insert|update|delete|merge|into|create|drop|alter|truncate|grant|revoke|copy|call|do|execute|lock|set|reset|analyze|analyse)\b/i.test(
+      tokens
+    )
+  ) {
     throw new Error(
-      'infra_query_db only accepts read-only statements (SELECT/WITH/SHOW/EXPLAIN/DESCRIBE). Use infra_propose_fix + infra_execute_fix for anything that writes data.'
+      'infra_query_db accepts one read-only statement; mutations require an approved fix'
     );
+  }
+  // A read-only transaction cannot make arbitrary stored functions safe. Only
+  // side-effect-free SQL functions used by supported analytical lookups are allowed.
+  const safeFunctions = new Set([
+    'count',
+    'sum',
+    'avg',
+    'min',
+    'max',
+    'round',
+    'abs',
+    'ceil',
+    'ceiling',
+    'floor',
+    'coalesce',
+    'nullif',
+    'cast',
+    'extract',
+    'date_trunc',
+    'date_part',
+    'lower',
+    'upper',
+    'length',
+    'concat',
+    'substring',
+    'trim',
+    'now',
+    'current_date',
+    'current_timestamp',
+    'row_number',
+    'rank',
+    'dense_rank',
+    'lag',
+    'lead',
+    'first_value',
+    'last_value',
+    'greatest',
+    'least',
+    'stddev',
+    'stddev_samp',
+    'variance',
+    'percentile_cont',
+    'percentile_disc',
+    'json_agg',
+    'jsonb_agg',
+    'array_agg',
+    'string_agg',
+    'as',
+    'in',
+    'exists',
+    'over',
+    'filter',
+    'values',
+    'select',
+    'with',
+    'from',
+  ]);
+  for (const match of tokens.matchAll(/\b([a-z_][a-z_0-9]*)\s*\(/gi)) {
+    if (!safeFunctions.has(match[1].toLowerCase()))
+      throw new Error(`Function ${match[1]} is not allowed in read-only queries`);
   }
 }
 
-/** Runs a read-only SQL query for ad-hoc auditing/lookups. Auto-allowed — see assertReadOnlySelect. */
-export async function dbQuery(target: TargetCredentials, sql: string): Promise<string> {
+const QUERY_TIMEOUT_MS = 5000;
+const QUERY_ROW_LIMIT = 1000;
+
+function boundedQuery(sql: string): string {
+  const statement = sql.trim().replace(/;\s*$/, '');
+  return /^\s*(select|with)\b/i.test(statement)
+    ? `SELECT * FROM (${statement}) AS cowork_readonly LIMIT ${QUERY_ROW_LIMIT + 1}`
+    : statement;
+}
+
+function formatQueryRows(rows: unknown[]): string {
+  return JSON.stringify({
+    rowCount: Math.min(rows.length, QUERY_ROW_LIMIT),
+    truncated: rows.length > QUERY_ROW_LIMIT,
+    rows: rows.slice(0, QUERY_ROW_LIMIT),
+  });
+}
+
+/** Execute in an enforced read-only transaction, bounded in time and row count. */
+export async function dbQuery(
+  target: TargetCredentials,
+  sql: string,
+  signal?: AbortSignal
+): Promise<string> {
   assertReadOnlySelect(sql);
+  signal?.throwIfAborted();
   if (target.dbEngine === 'mysql') {
     const conn = await mysql.createConnection({
       host: target.host,
@@ -169,33 +257,54 @@ export async function dbQuery(target: TargetCredentials, sql: string): Promise<s
       user: target.username,
       password: target.secret,
       database: target.dbName,
-      connectTimeout: 8000,
+      connectTimeout: QUERY_TIMEOUT_MS,
+      multipleStatements: false,
     });
+    const abort = () => conn.destroy();
+    signal?.addEventListener('abort', abort, { once: true });
     try {
-      const [rows] = await conn.query(sql);
-      return JSON.stringify(rows).slice(0, 2000);
+      signal?.throwIfAborted();
+      await conn.query('SET SESSION MAX_EXECUTION_TIME = 5000');
+      await conn.query('START TRANSACTION READ ONLY');
+      const [rows] = await conn.query({ sql: boundedQuery(sql), timeout: QUERY_TIMEOUT_MS });
+      return formatQueryRows(rows as unknown[]);
     } finally {
-      await conn.end();
+      signal?.removeEventListener('abort', abort);
+      try {
+        await conn.rollback();
+      } finally {
+        conn.destroy();
+      }
     }
   }
-
   const client = new PgClient({
     host: target.host,
     port: target.port || 5432,
     user: target.username,
     password: target.secret,
     database: target.dbName || 'postgres',
-    connectionTimeoutMillis: 8000,
+    connectionTimeoutMillis: QUERY_TIMEOUT_MS,
+    query_timeout: QUERY_TIMEOUT_MS + 1000,
   });
-  await client.connect();
+  const abort = () => {
+    void client.end().catch(() => undefined);
+  };
+  signal?.addEventListener('abort', abort, { once: true });
   try {
-    const result = await client.query(sql);
-    return JSON.stringify({ rowCount: result.rowCount, rows: result.rows.slice(0, 20) }).slice(
-      0,
-      2000
-    );
+    signal?.throwIfAborted();
+    await client.connect();
+    await client.query('BEGIN READ ONLY');
+    await client.query("SET LOCAL statement_timeout = '5s'");
+    await client.query("SET LOCAL lock_timeout = '1s'");
+    const result = await client.query(boundedQuery(sql));
+    return formatQueryRows(result.rows);
   } finally {
-    await client.end();
+    signal?.removeEventListener('abort', abort);
+    try {
+      if (!signal?.aborted) await client.query('ROLLBACK');
+    } finally {
+      await client.end();
+    }
   }
 }
 

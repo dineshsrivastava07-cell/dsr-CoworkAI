@@ -162,13 +162,13 @@ describe('permission-rules-store', () => {
       expect(decidePermission(SESSION_A, 'Bash', {})).toBe('allow');
     });
 
-    it('always-allow takes precedence over a configured deny rule', () => {
+    it('configured deny rules override remembered always-allow grants', () => {
       // Security note: this matches the documented matching order (session
       // memory first, then rules). If this behaviour ever needs to change
       // for security reasons, this test should fail loudly.
       setPermissionRules([{ tool: 'bash', action: 'deny' }]);
       rememberAlwaysAllow(SESSION_A, 'bash');
-      expect(decidePermission(SESSION_A, 'bash', {})).toBe('allow');
+      expect(decidePermission(SESSION_A, 'bash', {})).toBe('deny');
     });
   });
 

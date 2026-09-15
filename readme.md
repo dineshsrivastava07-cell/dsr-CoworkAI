@@ -27,6 +27,19 @@ Built on top of the Electron + React stack, V-Coworker gives you:
 - Remote control via Slack (or other channel adapters) plus VNC-based remote desktop
 - Full TypeScript codebase — hackable and extendable
 
+### Reliability and security boundaries
+
+The execution path includes explicit controls for organizational use:
+
+- Delegated workers run inside the parent workspace, inherit the parent permission policy, and preserve MCP image/error results.
+- Deny rules override remembered grants; changing permission rules invalidates session grants.
+- Database lookup tools accept one bounded read-only statement and execute it inside a read-only transaction with timeout and cancellation handling.
+- Infrastructure fixes require a proposal, a trusted approval recorded by the main process, a single-use execution claim, and post-fix verification.
+- Office shortcuts reject multi-artifact/research requests, validate artifact responses, and support multiple source files and common Office/PDF inputs.
+- RPA recipe replay fails when semantic relocation cannot find the target instead of clicking stale coordinates.
+
+MCP Docker and clickhouse-cloud are intentionally outside this project scope and are not bundled, configured, or required.
+
 ---
 
 ## Features
@@ -120,6 +133,18 @@ Edit **Settings -> API -> Ollama** and set any model tag pulled via `ollama pull
 ## Architecture
 
 See [Architecture.md](./Architecture.md) for the full system design with flow diagrams.
+
+## Verification
+
+Run the local checks before publishing a build:
+
+```bash
+npm run typecheck
+npm run lint
+npm test -- --run
+```
+
+Focused safety and workflow suites cover permissions, delegated agents, read-only database queries, encrypted-store migration, infrastructure proposal safety, Office/Gantt behavior, and RPA recipe storage. Live provider, database, desktop, browser, spreadsheet-engine, packaging, and stakeholder acceptance require their corresponding fixtures and are reported separately from local unit-test evidence.
 
 ---
 

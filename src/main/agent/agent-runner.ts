@@ -57,6 +57,7 @@ import { PluginRuntimeService } from '../skills/plugin-runtime-service';
 import type { SkillsAdapter } from '../skills/skills-adapter';
 import { AgentRuntimeExtensionManager } from '../extensions/agent-runtime-extension-manager';
 import { configStore } from '../config/config-store';
+import { approveInfraFix } from '../mcp/infra-rca-broker';
 import { normalizeOpenAICompatibleBaseUrl } from '../config/auth-utils';
 import {
   buildTerminalErrorEmissionDetails,
@@ -593,6 +594,15 @@ export class CoworkAgentRunner {
    */
   private detectOfficeDocIntent(prompt: string): string | null {
     const lower = prompt.toLowerCase();
+    // Multi-artifact, research, and dependency-heavy requests need the model
+    // orchestrator so every requested deliverable is planned and validated.
+    if (
+      /(?:\b(and|plus|along with)\b.*\b(pptx?|powerpoint|word|docx?|excel|xlsx?|spreadsheet|pdf)\b)|\b(research|compare|source|dependency|dependencies|timeline|milestone)\b/i.test(
+        lower
+      )
+    ) {
+      return null;
+    }
     // PPT and Word checked FIRST — so "create ppt from X.xlsx" routes to PPT, not Excel
     if (/\b(powerpoint|pptx?|presentation|slides|slide deck|deck)\b/.test(lower)) {
       return 'mcp__Office_Tools__create_presentation';
@@ -666,7 +676,7 @@ export class CoworkAgentRunner {
     return null;
   }
 
-  /** Read xlsx/csv/txt into plain text for injecting into the MCP tool description */
+  /** Extract supported office/text sources with an explicit coverage label. */
   private readAttachedFileContent(filePath: string): string | null {
     const ext = path.extname(filePath).toLowerCase();
     try {
@@ -691,6 +701,24 @@ export class CoworkAgentRunner {
           .toString()
           .slice(0, 8000);
       }
+      if (ext === '.pdf') {
+        return execFileSync('pdftotext', ['-layout', filePath, '-'], { timeout: 15000 })
+          .toString()
+          .slice(0, 8000);
+      }
+      if (ext === '.docx' || ext === '.pptx') {
+        const xml = execFileSync(
+          'unzip',
+          ['-p', filePath, ext === '.docx' ? 'word/document.xml' : 'ppt/slides/slide1.xml'],
+          { timeout: 15000 }
+        ).toString();
+        return xml
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 8000);
+      }
     } catch {
       return null;
     }
@@ -699,6 +727,13 @@ export class CoworkAgentRunner {
 
   private isExplicitBrowserIntent(prompt: string): boolean {
     const lower = prompt.toLowerCase();
+    if (
+      /(?:\b(and|plus|along with)\b.*\b(pptx?|powerpoint|word|docx?|excel|xlsx?|spreadsheet|pdf)\b)|\b(research|compare|source|dependency|dependencies|timeline|milestone)\b/i.test(
+        lower
+      )
+    ) {
+      return false;
+    }
     return /\b(open|use|browse|navigate|visit|go to|search|google|web|website|url|http|https|browser|chrome|amazon|nasdaq|flight|stock price|current price|latest news)\b/.test(
       lower
     );
@@ -798,9 +833,10 @@ export class CoworkAgentRunner {
           timestamp: Date.now(),
         });
       }
+      const sourceParts: string[] = [];
       for (const filePath of referencedFilePaths) {
         if (!fs.existsSync(filePath)) continue;
-        sourceFile = filePath;
+        sourceFile = sourceFile || filePath;
         this.sendTraceStep(session.id, {
           id: uuidv4(),
           type: 'tool_result',
@@ -821,12 +857,13 @@ export class CoworkAgentRunner {
             toolOutput: `${path.basename(filePath)} (${fileContent.length.toLocaleString()} chars sampled)`,
             timestamp: Date.now(),
           });
-          description =
-            `User request: ${effectivePrompt}\n\n` +
-            `=== CONTENT FROM ATTACHED FILE: ${path.basename(filePath)} ===\n${fileContent}`;
-          break;
+          sourceParts.push(
+            `=== CONTENT FROM ATTACHED FILE: ${path.basename(filePath)} ===\n${fileContent}`
+          );
         }
       }
+      if (sourceParts.length > 0)
+        description = `User request: ${effectivePrompt}\n\n${sourceParts.join('\n\n')}`;
 
       const officeStepId = uuidv4();
       this.sendTraceStep(session.id, {
@@ -847,10 +884,17 @@ export class CoworkAgentRunner {
         ...(sourceFile ? { source_file: sourceFile } : {}),
       });
 
+      if ((result as { isError?: boolean }).isError) {
+        throw new Error('Office tool reported an error');
+      }
       const text = Array.isArray((result as { content?: { text?: string }[] }).content)
         ? ((result as { content: { text?: string }[] }).content[0]?.text ?? String(result))
         : String(result);
 
+      const artifactCheck = extractArtifactsFromText(text);
+      if (artifactCheck.artifacts.length === 0 && !/created|saved|generated/i.test(text)) {
+        throw new Error('Office tool returned no validated artifact result');
+      }
       this.sendTraceUpdate(session.id, officeStepId, {
         status: 'completed',
         title: 'Office artifact generated',
@@ -910,8 +954,10 @@ export class CoworkAgentRunner {
   /** Call after the user changes MCP server config so the next query rebuilds mcpServers. */
   invalidateMcpServersCache(): void {
     this._mcpServersCache = null;
-    // Sessions stay alive — MCP tools are rebuilt each query via buildMcpCustomTools()
-    log('[CoworkAgentRunner] MCP servers cache invalidated — tools will rebuild on next query');
+    // AgentSession snapshots its custom-tool registry at creation. Dispose
+    // cached sessions so removed/changed MCP tools cannot remain callable.
+    this.clearAllSdkSessions();
+    log('[CoworkAgentRunner] MCP servers cache invalidated — cached sessions disposed');
   }
 
   // TODO: Credentials should be served via a secure MCP tool or IPC channel,
@@ -1290,7 +1336,14 @@ ${hints.join('\n')}
         // 'deny' rules above are never affected, and this does not touch
         // tool-level safety checks that are independent of the permission
         // system (e.g. GUI_Operate's irreversible-click confirmation).
-        if (decision === 'ask' && configStore.get('autoApproveTools')) {
+        // Infrastructure fix execution always requires a trusted human
+        // approval. Autonomous mode must not turn a model supplied
+        // `confirm_fix` flag into authorization.
+        if (
+          decision === 'ask' &&
+          configStore.get('autoApproveTools') &&
+          toolName !== 'infra_execute_fix'
+        ) {
           log(`[CoworkAgentRunner] Tool '${toolName}' auto-approved (Autonomous Mode)`);
           this.getOrCreateLoopGuard(sessionId).recordPermissionAllow();
           return sdkBeforeToolCall ? sdkBeforeToolCall(ctx, signal) : undefined;
@@ -1360,6 +1413,10 @@ ${hints.join('\n')}
 
           if (result === 'allow_always') {
             rememberAlwaysAllow(sessionId, toolName);
+          }
+          if (toolName.endsWith('infra_execute_fix')) {
+            const proposalId = typeof input.proposal_id === 'string' ? input.proposal_id : '';
+            approveInfraFix(proposalId);
           }
         }
 
@@ -3637,6 +3694,11 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
   cancel(sessionId: string): void {
     const controller = this.activeControllers.get(sessionId);
     if (controller) controller.abort();
+  }
+
+  /** Signal for work currently running in a session, used by delegated workers. */
+  getAbortSignal(sessionId: string): AbortSignal | null {
+    return this.activeControllers.get(sessionId)?.signal || null;
   }
 
   private sendTraceStep(sessionId: string, step: TraceStep): void {

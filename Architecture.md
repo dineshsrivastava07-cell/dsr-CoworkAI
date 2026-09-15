@@ -8,6 +8,33 @@
 
 V-Coworker is a local-first, autonomous agentic desktop application built on Electron + React. By default, all LLM inference runs on-device via **Ollama + Gemma**, with no cloud API key required. Users can switch to **Gemini, OpenAI (ChatGPT), Anthropic, or OpenRouter** at any time from the chat header or Settings. The architecture is organized into three primary layers — the Electron main process (Node.js), the React renderer (UI), and the model-provider layer — with a permission/autonomy layer and a bundled MCP tool ecosystem sitting between the agent loop and everything it can act on.
 
+## Organizational execution safeguards
+
+The following path is enforced for organizational workflows. It is the boundary between a model suggestion and an externally visible side effect.
+
+```mermaid
+flowchart LR
+    U[Authorized organizational request] --> R[AgentRunner]
+    R --> P{Permission policy}
+    P -->|deny| X[Blocked with reason]
+    P -->|allow / approved ask| W[Workspace and capability scope]
+    W --> C{Operation type}
+    C -->|DB lookup| D[Read-only transaction\ntimeout + row bound + cancellation]
+    C -->|Delegated worker| A[Child session\nparent workspace + parent policy]
+    C -->|Office artifact| O[Source aggregation\nartifact/error validation]
+    C -->|RPA recipe| G[Semantic relocation\npostcondition required]
+    C -->|Infrastructure fix| I[Proposal + trusted approval\nsingle-use claim]
+    D --> V[Evidence/result validation]
+    A --> V
+    O --> V
+    G --> V
+    I --> Q[Post-fix diagnosis]
+    Q --> V
+    V -->|verified / partial / failed| S[Persist trace and show status]
+```
+
+MCP Docker and clickhouse-cloud are deliberately excluded from this architecture. They are not project dependencies, configured servers, or acceptance targets.
+
 ---
 
 ## High-Level Architecture

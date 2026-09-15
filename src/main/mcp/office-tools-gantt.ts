@@ -11,7 +11,12 @@ export function parseIsoDate(value: unknown): Date | null {
   if (!match) return null;
   const [, y, m, d] = match;
   const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)));
-  return Number.isNaN(date.getTime()) ? null : date;
+  if (Number.isNaN(date.getTime())) return null;
+  return date.getUTCFullYear() === Number(y) &&
+    date.getUTCMonth() + 1 === Number(m) &&
+    date.getUTCDate() === Number(d)
+    ? date
+    : null;
 }
 
 export function isoDate(date: Date): string {

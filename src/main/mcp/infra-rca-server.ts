@@ -100,6 +100,13 @@ async function resolveTarget(name: string): Promise<TargetCredentials> {
   return response.target;
 }
 
+async function isTrustedApproval(proposalId: string): Promise<boolean> {
+  const response = await brokerRequest<{ approved?: boolean }>(
+    `/infra-rca/approval?proposal_id=${encodeURIComponent(proposalId)}`
+  );
+  return response.approved === true;
+}
+
 async function listTargetNames(): Promise<{ name: string; protocol: string; host: string }[]> {
   const response = await brokerRequest<{
     targets?: { name: string; protocol: string; host: string }[];
@@ -132,6 +139,7 @@ interface PendingProposal {
   riskLevel: 'low' | 'medium' | 'high';
   createdAt: number;
   category?: DiagnosticCategory;
+  status: 'pending' | 'executing';
 }
 const PROPOSAL_TTL_MS = 15 * 60 * 1000;
 const pendingProposals = new Map<string, PendingProposal>();
@@ -379,6 +387,7 @@ function createMcpServer() {
             riskLevel: risk_level,
             createdAt: Date.now(),
             category,
+            status: 'pending',
           });
           return {
             content: [
@@ -408,6 +417,17 @@ function createMcpServer() {
               ],
             };
           }
+          if (!(await isTrustedApproval(proposal_id))) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text',
+                  text: 'Refused: no trusted user approval was recorded for this proposal.',
+                },
+              ],
+            };
+          }
           const proposal = pendingProposals.get(proposal_id);
           if (!proposal || proposal.targetName !== target_name) {
             return {
@@ -420,24 +440,51 @@ function createMcpServer() {
               ],
             };
           }
-          const target = await resolveTarget(target_name);
+          if (proposal.status !== 'pending') {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text',
+                  text: 'Refused: this proposal is already executing or has been consumed.',
+                },
+              ],
+            };
+          }
+          proposal.status = 'executing';
+          let target: TargetCredentials;
+          try {
+            target = await resolveTarget(target_name);
+          } catch (error) {
+            pendingProposals.delete(proposal_id);
+            throw error;
+          }
           const output = await executeFixCommand(target, proposal.command);
           pendingProposals.delete(proposal_id);
           let verificationText = '';
+          let verificationStatus = proposal.category ? 'unresolved' : 'not_run';
           if (proposal.category) {
             try {
               const verification = await diagnose(target, proposal.category);
+              const metrics =
+                (verification as { metrics?: Array<{ status?: string }> }).metrics || [];
+              verificationStatus = metrics.some(
+                (metric) => metric.status === 'critical' || metric.status === 'warning'
+              )
+                ? 'unresolved'
+                : 'verified';
               verificationText = `\n\nPost-fix verification (re-ran ${proposal.category}):\n${JSON.stringify(verification, null, 2)}`;
             } catch (verifyErr: unknown) {
               const verifyMsg = verifyErr instanceof Error ? verifyErr.message : String(verifyErr);
-              verificationText = `\n\nPost-fix verification failed to run: ${verifyMsg}. Fix output above may still be correct \u2014 verify manually if needed.`;
+              verificationStatus = 'verification_failed';
+              verificationText = `\n\nPost-fix verification failed to run: ${verifyMsg}. The remediation is unresolved until verification succeeds.`;
             }
           }
           return {
             content: [
               {
                 type: 'text',
-                text: `Executed fix on "${target_name}":\n${proposal.command}\n\nOutput:\n${output}${verificationText}`,
+                text: `Executed fix on "${target_name}" (verification: ${verificationStatus}):\n${proposal.command}\n\nOutput:\n${output}${verificationText}`,
               },
             ],
           };
