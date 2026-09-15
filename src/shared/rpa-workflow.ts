@@ -1,3 +1,40 @@
+export type RpaDefinedStepAction = 'click' | 'type_text' | 'key_press' | 'scroll' | 'drag' | 'wait';
+
+export interface RpaDefinedStep {
+  id: string;
+  action: RpaDefinedStepAction;
+  target: string;
+  value: string;
+  notes: string;
+}
+
+export interface RpaReferenceScreenshot {
+  id: string;
+  path: string;
+  description: string;
+  capturedAt: number;
+}
+
+export interface RpaRecipeDefinitionInput {
+  name: string;
+  appName: string;
+  description?: string;
+  steps: RpaDefinedStep[];
+  executionMode?: 'ui' | 'background' | 'headless';
+  credentialProfile?: string;
+  successCheck: string;
+}
+
+export interface RpaRecipePublic {
+  id: string;
+  name: string;
+  appName: string;
+  description?: string;
+  executionMode?: 'ui' | 'background' | 'headless';
+  credentialProfile?: string;
+  successCheck?: string;
+}
+
 export interface RpaWorkflowBrief {
   name: string;
   surface: 'desktop' | 'web' | 'remote';
@@ -7,9 +44,15 @@ export interface RpaWorkflowBrief {
   successCheck: string;
   executionMode?: 'ui' | 'background' | 'headless';
   credentialProfile?: string;
-  trigger?: 'manual' | 'schedule' | 'watch';
+  trigger?: 'manual' | 'schedule' | 'once' | 'daily' | 'weekly' | 'interval' | 'watch';
   scheduleAt?: string;
+  scheduleTimes?: string[];
+  scheduleWeekdays?: number[];
+  repeatEvery?: number;
+  repeatUnit?: 'minute' | 'hour' | 'day';
   watchUrl?: string;
+  definedSteps?: RpaDefinedStep[];
+  referenceScreenshots?: RpaReferenceScreenshot[];
 }
 
 export interface SavedRpaWorkflowConfiguration extends RpaWorkflowBrief {
@@ -35,17 +78,38 @@ export function normalizeRpaWorkflowBrief(brief: RpaWorkflowBrief): RpaWorkflowB
   if ((brief.watchUrl?.trim().length || 0) > 2_000) {
     throw new Error('Trigger URL is too long.');
   }
+  if ((brief.definedSteps?.length || 0) > 200) {
+    throw new Error('A workflow can contain at most 200 defined steps.');
+  }
+  if ((brief.referenceScreenshots?.length || 0) > 20) {
+    throw new Error('A workflow can contain at most 20 reference screenshots.');
+  }
   if (!['desktop', 'web', 'remote'].includes(brief.surface)) {
     throw new Error('Choose a valid application type.');
   }
   const executionMode = brief.executionMode || 'ui';
-  const trigger = brief.trigger || 'manual';
+  const requestedTrigger = brief.trigger || 'manual';
+  const trigger = requestedTrigger === 'schedule' ? 'daily' : requestedTrigger;
   if (!['ui', 'background', 'headless'].includes(executionMode)) {
     throw new Error('Choose a valid execution mode.');
   }
-  if (!['manual', 'schedule', 'watch'].includes(trigger)) {
+  if (!['manual', 'once', 'daily', 'weekly', 'interval', 'watch'].includes(trigger)) {
     throw new Error('Choose a valid trigger.');
   }
+  const scheduleTimes = Array.from(
+    new Set((brief.scheduleTimes || []).filter((time) => /^([01]\d|2[0-3]):[0-5]\d$/.test(time)))
+  ).sort();
+  const scheduleWeekdays = Array.from(
+    new Set(
+      (brief.scheduleWeekdays || []).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+    )
+  ).sort((left, right) => left - right);
+  const repeatEvery = Number.isFinite(brief.repeatEvery)
+    ? Math.max(1, Math.floor(brief.repeatEvery || 1))
+    : 1;
+  const repeatUnit = ['minute', 'hour', 'day'].includes(brief.repeatUnit || '')
+    ? brief.repeatUnit
+    : 'hour';
   return {
     name: brief.name.trim(),
     surface: brief.surface,
@@ -57,7 +121,47 @@ export function normalizeRpaWorkflowBrief(brief: RpaWorkflowBrief): RpaWorkflowB
     trigger,
     credentialProfile: brief.credentialProfile?.trim() || '',
     scheduleAt: brief.scheduleAt?.trim() || '',
+    scheduleTimes,
+    scheduleWeekdays,
+    repeatEvery,
+    repeatUnit,
     watchUrl: brief.watchUrl?.trim() || '',
+    definedSteps: (brief.definedSteps || []).map(normalizeDefinedStep),
+    referenceScreenshots: (brief.referenceScreenshots || []).map((screenshot) => ({
+      id: String(screenshot.id || '').slice(0, 200),
+      path: String(screenshot.path || '').slice(0, 4_000),
+      description: String(screenshot.description || '')
+        .trim()
+        .slice(0, 1_000),
+      capturedAt: Number.isFinite(screenshot.capturedAt) ? screenshot.capturedAt : Date.now(),
+    })),
+  };
+}
+
+function normalizeDefinedStep(step: RpaDefinedStep): RpaDefinedStep {
+  if (!['click', 'type_text', 'key_press', 'scroll', 'drag', 'wait'].includes(step.action)) {
+    throw new Error('A user-defined process step has an unsupported action.');
+  }
+  const target = String(step.target || '')
+    .trim()
+    .slice(0, 2_000);
+  const value = String(step.value || '')
+    .trim()
+    .slice(0, 20_000);
+  if (step.action === 'click' && !target) {
+    throw new Error('Every click step requires a semantic target description.');
+  }
+  if (['type_text', 'key_press'].includes(step.action) && !value) {
+    throw new Error(`${step.action} requires a value.`);
+  }
+  return {
+    id: String(step.id || '').slice(0, 200),
+    action: step.action,
+    target,
+    value,
+    notes: String(step.notes || '')
+      .trim()
+      .slice(0, 2_000),
   };
 }
 
@@ -82,7 +186,31 @@ Autonomous execution settings:
 - Trigger: ${trigger}
 - Credential profile reference: ${normalized.credentialProfile || 'Use the application session/account selected by the user; never ask for or record a password in this prompt.'}
 ${normalized.scheduleAt ? `- First scheduled run: ${normalized.scheduleAt}` : ''}
+${normalized.scheduleTimes?.length ? `- Scheduled time slots: ${normalized.scheduleTimes.join(', ')}` : ''}
+${normalized.scheduleWeekdays?.length ? `- Scheduled weekdays (0=Sunday): ${normalized.scheduleWeekdays.join(', ')}` : ''}
+${normalized.trigger === 'interval' ? `- Repeat every: ${normalized.repeatEvery} ${normalized.repeatUnit}` : ''}
 ${normalized.watchUrl ? `- Trigger URL: ${normalized.watchUrl}` : ''}
+
+User-defined executable steps:
+${
+  normalized.definedSteps?.length
+    ? normalized.definedSteps
+        .map(
+          (step, index) =>
+            `${index + 1}. ${step.action}${step.target ? ` — ${step.target}` : ''}${step.value ? ` — value: ${step.value}` : ''}${step.notes ? ` — ${step.notes}` : ''}`
+        )
+        .join('\n')
+    : 'No direct steps saved. Learn and record the process during the supervised session.'
+}
+
+Reference screenshots retained for setup context:
+${
+  normalized.referenceScreenshots?.length
+    ? normalized.referenceScreenshots
+        .map((screenshot) => `- ${screenshot.description || 'Reference state'}: ${screenshot.path}`)
+        .join('\n')
+    : 'None.'
+}
 
 Setup and execution requirements:
 1. Inspect the available tools and confirm the exact application, account/tenant, working folder, session and inputs. Use the named credential profile or an existing signed-in session; do not record passwords, OTPs or session tokens in prompts or recipes. If credentials are unavailable, stop with a clear setup error.

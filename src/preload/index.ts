@@ -46,7 +46,13 @@ import type {
   PairingRequest,
   RemoteSessionMapping,
 } from '../shared/ipc-types';
-import type { RpaWorkflowBrief, SavedRpaWorkflowConfiguration } from '../shared/rpa-workflow';
+import type {
+  RpaRecipeDefinitionInput,
+  RpaRecipePublic,
+  RpaReferenceScreenshot,
+  RpaWorkflowBrief,
+  SavedRpaWorkflowConfiguration,
+} from '../shared/rpa-workflow';
 
 // Track registered callbacks to prevent duplicate listeners
 let registeredCallback: ((event: ServerEvent) => void) | null = null;
@@ -304,6 +310,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }> => ipcRenderer.invoke('rpaWorkflows.save', workflow),
     delete: (name: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('rpaWorkflows.delete', name),
+  },
+
+  rpaStudio: {
+    listRecipes: (): Promise<RpaRecipePublic[]> => ipcRenderer.invoke('rpaStudio.listRecipes'),
+    saveRecipe: (
+      input: RpaRecipeDefinitionInput
+    ): Promise<{ success: boolean; recipe?: RpaRecipePublic; error?: string }> =>
+      ipcRenderer.invoke('rpaStudio.saveRecipe', input),
+    deleteRecipe: (name: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('rpaStudio.deleteRecipe', name),
+    captureReferenceScreenshot: (input: {
+      workflowName: string;
+      description: string;
+    }): Promise<{ success: boolean; screenshot?: RpaReferenceScreenshot; error?: string }> =>
+      ipcRenderer.invoke('rpaStudio.captureReferenceScreenshot', input),
+    deleteReferenceScreenshot: (assetPath: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('rpaStudio.deleteReferenceScreenshot', assetPath),
+    readReferenceScreenshot: (
+      assetPath: string
+    ): Promise<{
+      success: boolean;
+      image?: { data: string; mediaType: 'image/png' };
+      error?: string;
+    }> => ipcRenderer.invoke('rpaStudio.readReferenceScreenshot', assetPath),
   },
 
   // Skills methods
@@ -638,6 +668,29 @@ declare global {
           error?: string;
         }>;
         delete: (name: string) => Promise<{ success: boolean; error?: string }>;
+      };
+      rpaStudio: {
+        listRecipes: () => Promise<RpaRecipePublic[]>;
+        saveRecipe: (
+          input: RpaRecipeDefinitionInput
+        ) => Promise<{ success: boolean; recipe?: RpaRecipePublic; error?: string }>;
+        deleteRecipe: (name: string) => Promise<{ success: boolean; error?: string }>;
+        captureReferenceScreenshot: (input: {
+          workflowName: string;
+          description: string;
+        }) => Promise<{
+          success: boolean;
+          screenshot?: RpaReferenceScreenshot;
+          error?: string;
+        }>;
+        deleteReferenceScreenshot: (
+          assetPath: string
+        ) => Promise<{ success: boolean; error?: string }>;
+        readReferenceScreenshot: (assetPath: string) => Promise<{
+          success: boolean;
+          image?: { data: string; mediaType: 'image/png' };
+          error?: string;
+        }>;
       };
       skills: {
         getAll: () => Promise<Skill[]>;

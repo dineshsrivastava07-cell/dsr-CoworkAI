@@ -6,7 +6,8 @@ import {
   type RpaWorkflowBrief,
   type SavedRpaWorkflowConfiguration,
 } from '../../../shared/rpa-workflow';
-import type { ScheduleCreateInput } from '../../types';
+import type { ContentBlock, ScheduleCreateInput } from '../../types';
+import { RpaProcessStudio } from './RpaProcessStudio';
 
 const inputClass =
   'w-full px-3 py-2 mt-1 rounded bg-background border border-border text-sm text-text-primary';
@@ -21,10 +22,20 @@ const emptyBrief: RpaWorkflowBrief = {
   trigger: 'manual',
   credentialProfile: '',
   scheduleAt: '',
+  scheduleTimes: [],
+  scheduleWeekdays: [],
+  repeatEvery: 1,
+  repeatUnit: 'hour',
   watchUrl: '',
+  definedSteps: [],
+  referenceScreenshots: [],
 };
 
 function savedWorkflowToBrief(workflow: SavedRpaWorkflowConfiguration): RpaWorkflowBrief {
+  const legacyTimestamp = workflow.scheduleAt ? new Date(workflow.scheduleAt).getTime() : NaN;
+  const legacyTime = Number.isFinite(legacyTimestamp)
+    ? new Date(legacyTimestamp).toTimeString().slice(0, 5)
+    : null;
   return {
     name: workflow.name,
     surface: workflow.surface,
@@ -33,11 +44,44 @@ function savedWorkflowToBrief(workflow: SavedRpaWorkflowConfiguration): RpaWorkf
     steps: workflow.steps,
     successCheck: workflow.successCheck,
     executionMode: workflow.executionMode,
-    trigger: workflow.trigger,
+    trigger: workflow.trigger === 'schedule' ? 'daily' : workflow.trigger,
     credentialProfile: workflow.credentialProfile,
     scheduleAt: workflow.scheduleAt,
+    scheduleTimes: workflow.scheduleTimes?.length
+      ? workflow.scheduleTimes
+      : legacyTime
+        ? [legacyTime]
+        : [],
+    scheduleWeekdays: workflow.scheduleWeekdays,
+    repeatEvery: workflow.repeatEvery,
+    repeatUnit: workflow.repeatUnit,
     watchUrl: workflow.watchUrl,
+    definedSteps: workflow.definedSteps,
+    referenceScreenshots: workflow.referenceScreenshots,
   };
+}
+
+function nextScheduleSlot(times: string[], weekdays?: number[]): number {
+  const allowedDays = weekdays ? new Set(weekdays) : null;
+  const now = new Date();
+  for (let offset = 0; offset <= 14; offset += 1) {
+    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+    if (allowedDays && !allowedDays.has(day.getDay())) continue;
+    for (const time of times) {
+      const [hour, minute] = time.split(':').map(Number);
+      const candidate = new Date(
+        day.getFullYear(),
+        day.getMonth(),
+        day.getDate(),
+        hour,
+        minute,
+        0,
+        0
+      ).getTime();
+      if (candidate > Date.now()) return candidate;
+    }
+  }
+  throw new Error('Could not calculate the next scheduled run.');
 }
 
 export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
@@ -54,6 +98,7 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
   const [copied, setCopied] = useState(false);
   const [credentialUsername, setCredentialUsername] = useState('');
   const [credentialPassword, setCredentialPassword] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('08:00');
 
   useEffect(() => {
     let active = true;
@@ -72,9 +117,9 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
     };
   }, []);
 
-  function change(key: keyof RpaWorkflowBrief, value: string) {
+  function change(key: keyof RpaWorkflowBrief, value: RpaWorkflowBrief[keyof RpaWorkflowBrief]) {
     setBrief({ ...brief, [key]: value });
-    if (key === 'name' && value.trim() !== selectedWorkflow) setSelectedWorkflow('');
+    if (key === 'name' && String(value || '').trim() !== selectedWorkflow) setSelectedWorkflow('');
     setDraft('');
     setCopied(false);
     setError('');
@@ -158,13 +203,33 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
     if (!prompt) return;
     setBusy(true);
     try {
+      const content: ContentBlock[] = [];
+      for (const screenshot of brief.referenceScreenshots || []) {
+        const result = await window.electronAPI.rpaStudio.readReferenceScreenshot(screenshot.path);
+        if (!result.success || !result.image) {
+          throw new Error(
+            result.error || `Could not read reference screenshot “${screenshot.description}”.`
+          );
+        }
+        content.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: result.image.mediaType,
+            data: result.image.data,
+          },
+        });
+      }
+      content.push({ type: 'text', text: prompt });
       const session = await startSession(
         `RPA setup: ${brief.name}`,
-        [{ type: 'text', text: prompt }],
+        content,
         workingDir || undefined
       );
       if (session) useAppStore.getState().setShowSettings(false);
       else setError('Could not start the setup conversation. Check your provider settings.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start guided recording.');
     } finally {
       setBusy(false);
     }
@@ -196,29 +261,85 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
           pollIntervalMs: 5 * 60 * 1000,
         },
       };
-    } else {
+    } else if (brief.trigger === 'once') {
       const runAt = brief.scheduleAt ? new Date(brief.scheduleAt).getTime() : NaN;
       if (!Number.isFinite(runAt) || runAt <= now) {
-        setError('Choose a future first-run time for the autonomous job.');
+        setError('Choose a future run time for the one-time autonomous job.');
         return;
       }
-      const time = new Date(runAt).toTimeString().slice(0, 5);
       payload = {
         prompt: `${prompt}\n\n${runInstruction}`,
         cwd: workingDir || '',
         runAt,
         nextRunAt: runAt,
         enabled: true,
-        scheduleConfig: { kind: 'daily', times: [time] },
+      };
+    } else if (brief.trigger === 'daily' || brief.trigger === 'weekly') {
+      const times = brief.scheduleTimes || [];
+      const weekdays = brief.scheduleWeekdays || [];
+      if (times.length === 0) {
+        setError('Add at least one daily time slot.');
+        return;
+      }
+      if (brief.trigger === 'weekly' && weekdays.length === 0) {
+        setError('Select at least one weekday.');
+        return;
+      }
+      const runAt = nextScheduleSlot(times, brief.trigger === 'weekly' ? weekdays : undefined);
+      payload = {
+        prompt: `${prompt}\n\n${runInstruction}`,
+        cwd: workingDir || '',
+        runAt,
+        nextRunAt: runAt,
+        enabled: true,
+        scheduleConfig:
+          brief.trigger === 'weekly'
+            ? {
+                kind: 'weekly',
+                weekdays: weekdays as Array<0 | 1 | 2 | 3 | 4 | 5 | 6>,
+                times,
+              }
+            : { kind: 'daily', times },
+      };
+    } else {
+      const firstRun = brief.scheduleAt
+        ? new Date(brief.scheduleAt).getTime()
+        : now + 5 * 60 * 1000;
+      if (!Number.isFinite(firstRun) || firstRun <= now) {
+        setError('Choose a future first-run time for the repeating job.');
+        return;
+      }
+      payload = {
+        prompt: `${prompt}\n\n${runInstruction}`,
+        cwd: workingDir || '',
+        runAt: firstRun,
+        nextRunAt: firstRun,
+        enabled: true,
+        repeatEvery: Math.max(1, brief.repeatEvery || 1),
+        repeatUnit: brief.repeatUnit || 'hour',
       };
     }
     setBusy(true);
     setError('');
     try {
+      const recipes = await window.electronAPI.rpaStudio.listRecipes();
+      if (!recipes.some((recipe) => recipe.name === brief.name.trim())) {
+        throw new Error(
+          `No executable recipe named “${brief.name.trim()}”. Save defined steps or complete guided recording before scheduling.`
+        );
+      }
+      const savedWorkflow = await window.electronAPI.rpaWorkflows.save(brief);
+      if (!savedWorkflow.success || !savedWorkflow.workflow) {
+        throw new Error(savedWorkflow.error || 'Could not save the workflow before scheduling.');
+      }
+      const workflow = savedWorkflow.workflow;
+      setSavedWorkflows((current) => [
+        workflow,
+        ...current.filter((saved) => saved.name.toLowerCase() !== workflow.name.toLowerCase()),
+      ]);
+      setSelectedWorkflow(workflow.name);
       await window.electronAPI.schedule.create(payload);
-      setDraft(
-        `${prompt}\n\nAutonomous job created. Finish and save the recipe as "${brief.name.trim()}" before the first run.`
-      );
+      setDraft(`${prompt}\n\nAutonomous job created for recipe "${brief.name.trim()}".`);
       setStatus('Autonomous job created.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create autonomous job.');
@@ -382,6 +503,15 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
               placeholder="Re-open CSV; check date, department, employee count and output path"
             />
           </label>
+          <RpaProcessStudio
+            brief={brief}
+            connected={connected}
+            configured={configured}
+            onChange={change}
+            onError={setError}
+            onStatus={setStatus}
+            onStartGuidedRecording={reviewInChat}
+          />
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-xs text-text-secondary">
               Execution mode
@@ -403,7 +533,10 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
                 onChange={(e) => change('trigger', e.target.value)}
               >
                 <option value="manual">Manual / review in chat</option>
-                <option value="schedule">Daily schedule</option>
+                <option value="once">One time</option>
+                <option value="daily">Daily · one or multiple times</option>
+                <option value="weekly">Weekly · selected days and times</option>
+                <option value="interval">Repeat every N minutes / hours / days</option>
                 <option value="watch">HTTP change trigger</option>
               </select>
             </label>
@@ -451,9 +584,9 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
           >
             Save encrypted credential profile
           </button>
-          {brief.trigger === 'schedule' && (
+          {(brief.trigger === 'once' || brief.trigger === 'interval') && (
             <label className="block text-xs text-text-secondary">
-              First run
+              {brief.trigger === 'once' ? 'Run at' : 'First run'}
               <input
                 type="datetime-local"
                 className={inputClass}
@@ -461,6 +594,117 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
                 onChange={(e) => change('scheduleAt', e.target.value)}
               />
             </label>
+          )}
+          {(brief.trigger === 'daily' || brief.trigger === 'weekly') && (
+            <div className="space-y-2 rounded border border-border p-3">
+              {brief.trigger === 'weekly' && (
+                <div>
+                  <div className="text-xs text-text-secondary mb-2">Weekdays</div>
+                  <div className="flex gap-2 flex-wrap">
+                    {[
+                      ['Sun', 0],
+                      ['Mon', 1],
+                      ['Tue', 2],
+                      ['Wed', 3],
+                      ['Thu', 4],
+                      ['Fri', 5],
+                      ['Sat', 6],
+                    ].map(([label, day]) => (
+                      <label
+                        key={day}
+                        className="flex items-center gap-1 text-xs text-text-secondary"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={(brief.scheduleWeekdays || []).includes(Number(day))}
+                          onChange={() => {
+                            const current = brief.scheduleWeekdays || [];
+                            const numericDay = Number(day);
+                            change(
+                              'scheduleWeekdays',
+                              current.includes(numericDay)
+                                ? current.filter((candidate) => candidate !== numericDay)
+                                : [...current, numericDay].sort()
+                            );
+                          }}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                <label className="block text-xs text-text-secondary">
+                  Add time slot
+                  <input
+                    type="time"
+                    value={scheduleTime}
+                    onChange={(event) => setScheduleTime(event.target.value)}
+                    className={inputClass}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!scheduleTime) return;
+                    change(
+                      'scheduleTimes',
+                      Array.from(new Set([...(brief.scheduleTimes || []), scheduleTime])).sort()
+                    );
+                  }}
+                  className="px-3 py-2 rounded bg-surface-muted text-sm text-text-primary"
+                >
+                  Add time
+                </button>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {(brief.scheduleTimes || []).map((time) => (
+                  <button
+                    type="button"
+                    key={time}
+                    onClick={() =>
+                      change(
+                        'scheduleTimes',
+                        (brief.scheduleTimes || []).filter((candidate) => candidate !== time)
+                      )
+                    }
+                    className="px-2 py-1 rounded bg-surface-muted text-xs text-text-secondary"
+                    title="Remove time slot"
+                  >
+                    {time} ×
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {brief.trigger === 'interval' && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-xs text-text-secondary">
+                Repeat every
+                <input
+                  type="number"
+                  min={1}
+                  className={inputClass}
+                  value={brief.repeatEvery || 1}
+                  onChange={(event) =>
+                    change('repeatEvery', Math.max(1, Number(event.target.value)))
+                  }
+                />
+              </label>
+              <label className="block text-xs text-text-secondary">
+                Repeat unit
+                <select
+                  className={inputClass}
+                  value={brief.repeatUnit || 'hour'}
+                  onChange={(event) => change('repeatUnit', event.target.value)}
+                >
+                  <option value="minute">Minute(s)</option>
+                  <option value="hour">Hour(s)</option>
+                  <option value="day">Day(s)</option>
+                </select>
+              </label>
+            </div>
           )}
           {brief.trigger === 'watch' && (
             <label className="block text-xs text-text-secondary">
@@ -492,14 +736,6 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
             </button>
             <button
               type="button"
-              disabled={!connected || !configured || busy}
-              onClick={() => void reviewInChat()}
-              className="px-3 py-2 rounded bg-accent/80 text-white text-sm disabled:opacity-50"
-            >
-              {busy ? 'Starting…' : 'Review setup in chat'}
-            </button>
-            <button
-              type="button"
               disabled={!connected || !configured || busy || brief.trigger === 'manual'}
               onClick={() => void scheduleAutonomousRun()}
               className="px-3 py-2 rounded bg-accent/80 text-white text-sm disabled:opacity-50"
@@ -509,8 +745,8 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
           </div>
           {(!connected || !configured) && (
             <p className="text-xs text-text-muted">
-              Connect RPA and configure your model to review the setup in chat. You can prepare the
-              instructions now.
+              Connect RPA and configure your model to start guided recording in Process Studio. You
+              can save the workflow and define steps now.
             </p>
           )}
         </fieldset>

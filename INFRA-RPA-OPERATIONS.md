@@ -68,11 +68,13 @@ Example chat requests:
 2. Open the intended app, account and tenant. Sign in manually. On macOS grant Accessibility and Screen Recording permissions when prompted. Ensure the execution desktop is available and unlocked.
 3. Expand **Configure a business workflow**. Give the task a unique name and select local desktop, website, or Remote Desktop/Citrix.
 4. Enter the application/URL/remote host, input parameters, ordered business steps and a concrete success check. Save an encrypted credential profile in the form when autonomous login is required; passwords and OTPs never enter the prompt or recipe.
-5. Click **Save workflow configuration**. Confirm the workflow appears under **Saved workflow configuration** and can be reloaded. This saves the form only; it does not create a recipe or scheduled job.
-6. Choose **Prepare instructions** to inspect/copy the brief, or **Review setup in chat** to start a planning conversation. Review the proposed plan before application operations.
-7. Run a small sample against a test account. For desktop primitives, ask the agent to record each supported step and save a named recipe. Recording is agent-mediated; the connector is not a passive global recorder of everything you do with the mouse.
+5. In **Process Studio**, choose either of these setup paths:
+   - Add ordered user-defined steps. Give every click a semantic target such as `Export attendance button`; use placeholders such as `{{report_date}}` for changing values. Click **Save executable recipe**.
+   - Put the application at a safe starting screen, optionally click **Capture current screen**, then click **Start guided recording in chat**. The agent senses the screen, performs the approved sample and records each supported operation.
+6. Click **Save workflow configuration**. Confirm the workflow appears under **Saved workflow configuration** and can be reloaded with its defined steps and reference screenshots.
+7. Run a small sample against a test account. Directly defined recipes are saved but not executed by the Save action. Guided recording is agent-mediated; the connector does not silently monitor every mouse and keyboard action on the workstation.
 8. Replay with representative inputs and after moving the window. Re-open the resulting record/file and compare business values with the expected result.
-9. Select **UI**, **Background** or **Headless** execution mode. Headless is only for browser/API workflows; GUI recipes need an available desktop. Use **Create autonomous job** for a daily schedule or HTTP change trigger, or manage the same task under **Settings → Schedule**. Enable **Autonomous Mode** for unattended safe tools. Interactive MFA, a missing profile, unexpected dialogs or required approvals stop the job safely.
+9. Select the required autonomous trigger: one time; daily with one or multiple time slots; weekly with selected days and time slots; every N minutes/hours/days; or an HTTP change trigger. Click **Create autonomous job** only after supervised replay passes. Enable **Autonomous Mode** for unattended safe tools. Interactive MFA, a missing profile, unexpected dialogs or required approvals stop the job safely.
 
 Platform setup:
 

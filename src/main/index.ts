@@ -75,6 +75,15 @@ import { startInfraRcaBroker, stopInfraRcaBroker } from './mcp/infra-rca-broker'
 import { infraRcaStore } from './mcp/infra-rca-store';
 import { rpaCredentialStore } from './mcp/rpa-credential-store';
 import { rpaWorkflowStore } from './mcp/rpa-workflow-store';
+import {
+  deleteProcessRecipe,
+  deleteReferenceScreenshot,
+  extractScreenshotPath,
+  listProcessRecipes,
+  readReferenceScreenshot,
+  retainReferenceScreenshot,
+  saveDefinedRecipe,
+} from './mcp/rpa-process-studio';
 import { checkInfraConnection } from './mcp/infra-connection-check';
 import {
   ScheduledTaskManager,
@@ -2430,6 +2439,94 @@ ipcMain.handle('rpaWorkflows.delete', (_event, name: string) => {
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to delete workflow configuration.',
+    };
+  }
+});
+
+ipcMain.handle('rpaStudio.listRecipes', () => listProcessRecipes());
+ipcMain.handle(
+  'rpaStudio.saveRecipe',
+  async (_event, input: Parameters<typeof saveDefinedRecipe>[0]) => {
+    try {
+      return { success: true, recipe: await saveDefinedRecipe(input) };
+    } catch (error) {
+      logError('[RPA Studio] Failed to save recipe:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to save recipe.',
+      };
+    }
+  }
+);
+ipcMain.handle('rpaStudio.deleteRecipe', async (_event, name: string) => {
+  try {
+    await deleteProcessRecipe(name);
+    return { success: true };
+  } catch (error) {
+    logError('[RPA Studio] Failed to delete recipe:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to delete recipe.',
+    };
+  }
+});
+ipcMain.handle(
+  'rpaStudio.captureReferenceScreenshot',
+  async (_event, input: { workflowName: string; description: string }) => {
+    try {
+      if (!sessionManager) throw new Error('RPA is not initialized.');
+      const manager = sessionManager.getMCPManager();
+      const screenshotTool = manager
+        .getTools()
+        .find(
+          (tool) =>
+            tool.serverName.replace(/[ _-]/g, '').toLowerCase() === 'guioperate' &&
+            (tool.originalName || tool.name.split('__').pop()) === 'screenshot'
+        );
+      if (!screenshotTool) {
+        throw new Error('Enable RPA and wait for GUI_Operate to connect before capturing.');
+      }
+      const result = await manager.callTool(screenshotTool.name, {});
+      const sourcePath = extractScreenshotPath(result);
+      const screenshot = await retainReferenceScreenshot(
+        sourcePath,
+        app.getPath('userData'),
+        input.workflowName,
+        input.description
+      );
+      return { success: true, screenshot };
+    } catch (error) {
+      logError('[RPA Studio] Failed to capture reference screenshot:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to capture reference screenshot.',
+      };
+    }
+  }
+);
+ipcMain.handle('rpaStudio.deleteReferenceScreenshot', async (_event, assetPath: string) => {
+  try {
+    await deleteReferenceScreenshot(assetPath, app.getPath('userData'));
+    return { success: true };
+  } catch (error) {
+    logError('[RPA Studio] Failed to delete reference screenshot:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to delete reference screenshot.',
+    };
+  }
+});
+ipcMain.handle('rpaStudio.readReferenceScreenshot', async (_event, assetPath: string) => {
+  try {
+    return {
+      success: true,
+      image: await readReferenceScreenshot(assetPath, app.getPath('userData')),
+    };
+  } catch (error) {
+    logError('[RPA Studio] Failed to read reference screenshot:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to read reference screenshot.',
     };
   }
 });

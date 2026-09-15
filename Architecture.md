@@ -378,13 +378,19 @@ DVR/camera (ONVIF) support is intentionally not built — no vendor/model was sp
 
 RPA is opt-in through **Settings → MCP Connectors → RPA / Desktop automation → Enable RPA**. The card reuses an existing `GUI_Operate` configuration or creates the bundled preset, then saves through `mcp.saveServer`. The main process connects the server, discovers tools, and invalidates cached agent sessions. Disabling disconnects the connector; the saved disabled configuration persists across restarts. The card reports connection state and tool count, and refreshes the saved state after a connection failure.
 
-`RpaWorkflowSetup` collects a business brief plus execution mode, encrypted credential-profile reference and manual/schedule/watch trigger. **Save workflow configuration** writes the normalized definition to the encrypted `rpa-workflows` Electron store through typed preload IPC, then lets the operator reload or delete it. The stored definition contains only the credential-profile name; passwords remain in the separate encrypted credential store. `buildRpaWorkflowPrompt` translates the definition into an agentic run contract carrying inputs, steps and application-level success checks. **Review setup in chat** uses the existing `useIPC.startSession` path for the initial supervised recording; **Create autonomous job** persists a daily or HTTP change-triggered scheduled agent task through the existing scheduler. The scheduled agent invokes the saved recipe, resolves credentials inside the GUI connector, captures before/after evidence and reports postcondition status. Headless mode is explicitly rejected for GUI recipes; browser/API workflows must use their native tools.
+`RpaWorkflowSetup` collects a business brief plus execution mode, encrypted credential-profile reference and autonomous trigger. Its embedded `RpaProcessStudio` lets an operator define ordered click/type/key/scroll/drag/wait steps, retain current-screen reference captures, list/delete executable recipes, or enter a guided agent recording. **Save workflow configuration** writes the normalized definition to the encrypted `rpa-workflows` Electron store through typed preload IPC, then lets the operator reload or delete it. The stored definition contains only the credential-profile name; passwords remain in the separate encrypted credential store. Durable reference images live under the app user-data `rpa-process-assets` directory and can be removed only through a path-restricted IPC handler.
+
+`rpa-process-studio.ts` validates and converts user-defined steps into the existing recipe schema. Every direct click requires semantic target identity; key combinations, waits, scrolls and normalized drags are bounded. Direct recipe creation never executes the steps. `buildRpaWorkflowPrompt` translates the saved definition into an agentic run contract carrying inputs, reference paths, steps and application-level success checks. **Start guided recording in chat** reads retained images through a path-restricted, size-bounded IPC method and sends them as image content blocks with the instructions for initial sensing and supervised operation. **Create autonomous job** persists one-time, multi-slot daily, selected-day weekly, interval or HTTP change-triggered tasks through the scheduler. The scheduled agent invokes the saved recipe, resolves credentials inside the GUI connector, captures before/after evidence and reports postcondition status. Headless mode is explicitly rejected for GUI recipes; browser/API workflows must use their native tools.
 
 ```mermaid
 flowchart LR
-    FORM[Workflow form] -->|Save / list / delete| WFIPC[rpaWorkflows IPC]
+    FORM[Workflow form + Process Studio] -->|Save / list / delete| WFIPC[rpaWorkflows IPC]
     WFIPC --> WFSTORE[(Encrypted workflow store)]
     WFSTORE --> FORM
+    FORM -->|Defined steps| STUDIO[rpaStudio IPC]
+    STUDIO --> RECIPE[(Executable recipe JSON)]
+    FORM -->|Capture current screen| GUI[GUI_Operate screenshot]
+    GUI --> ASSET[(Durable reference asset)]
     UI[Settings: Enable / Disable RPA] --> IPC[mcp.saveServer]
     IPC --> STORE[MCP config store]
     IPC --> MGR[MCPManager.updateServer]

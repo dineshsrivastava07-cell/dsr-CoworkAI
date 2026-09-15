@@ -25,14 +25,15 @@ This guide describes the current Electron desktop application. Updating GitHub s
 
 ## 1. Purpose and supported scope
 
-| Capability          | What it does                                                                                 | What setup alone does not establish                                                            |
-| ------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Infra RCA inventory | Stores named SSH, WinRM, SNMP and database targets, including credentials                    | Connectivity, valid login, diagnostic privileges or continuous monitoring                      |
-| Bulk import         | Validates CSV/JSON and saves up to 10,000 systems per batch                                  | Automatic discovery or deployment of workers to those computers                                |
-| Infra RCA connector | Gives the agent tools to discover configured targets, diagnose and propose fixes             | Permission to apply every proposal                                                             |
-| RPA connector       | Makes desktop input, screenshots, vision and recipe tools available                          | A process definition for each ERP, HRMS or desktop application                                 |
-| RPA workflow form   | Configures execution mode, encrypted credential profile reference and schedule/watch trigger | A saved executable recipe or proof of business accuracy                                        |
-| Desktop recipe      | Stores supported desktop actions for named replay                                            | Browser/API action recording, distributed execution or a domain-specific correctness guarantee |
+| Capability          | What it does                                                                            | What setup alone does not establish                                                            |
+| ------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Infra RCA inventory | Stores named SSH, WinRM, SNMP and database targets, including credentials               | Connectivity, valid login, diagnostic privileges or continuous monitoring                      |
+| Bulk import         | Validates CSV/JSON and saves up to 10,000 systems per batch                             | Automatic discovery or deployment of workers to those computers                                |
+| Infra RCA connector | Gives the agent tools to discover configured targets, diagnose and propose fixes        | Permission to apply every proposal                                                             |
+| RPA connector       | Makes desktop input, screenshots, vision and recipe tools available                     | A process definition for each ERP, HRMS or desktop application                                 |
+| RPA workflow form   | Persists the business definition, parameters, reference captures and autonomous trigger | Proof that the recipe works against the intended application                                   |
+| RPA Process Studio  | Builds an executable recipe from defined steps or starts a guided agent recording       | A passive global recording of unrelated mouse, keyboard or screen activity                     |
+| Desktop recipe      | Stores supported desktop actions for named replay                                       | Browser/API action recording, distributed execution or a domain-specific correctness guarantee |
 
 **Terms:** a _target_ is one configured infrastructure endpoint; a _connector_ is the tool service; a _workflow_ is the business process; a _recipe_ is its recorded desktop-action sequence; a _success check_ confirms the actual business result after execution.
 
@@ -228,10 +229,12 @@ GUI_Operate runs on the execution desktop. A remote window is one visible surfac
 5. Enter **Inputs / parameters (no passwords)**, such as `report_date`, `department`, and `output_folder`.
 6. Enter **Business steps** in order. Include how to select the correct record and what to do when it is missing or already exists.
 7. Enter **Success check and evidence**: specify what will be reopened/read back and the expected business values.
-8. Click **Save workflow configuration**. Confirm the name appears in **Saved workflow configuration**, select it again, and verify the fields reload. This action is available without a connected RPA connector or configured model. It saves the form, not an executable recipe or job.
-9. Click **Prepare instructions** and review the resulting brief. Use **Copy instructions** if needed.
-10. Click **Review setup in chat**. The button requires connected RPA and a configured model. Expect a new setup conversation requesting a plan before application operations.
-11. Review the plan with the application owner. Save the recipe from the conversation, then use **Create autonomous job** for a daily or HTTP change-triggered run. The scheduled agent resolves the credential profile inside GUI_Operate and reports evidence/postcondition status.
+8. Open **Process Studio** in the same form. Add ordered user-defined steps or put the application at a safe starting screen and click **Capture current screen** to retain a reference state. Reference captures are organizational data; describe them clearly and remove obsolete captures. Starting guided recording sends the retained images to the configured model with the workflow instructions.
+9. For a direct recipe, select each action and enter its semantic target/value. Use `{{parameter}}` placeholders for changing business inputs. Click **Save executable recipe**. Saving does not execute or validate the business outcome.
+10. For a learned process, click **Start guided recording in chat**. The button requires connected RPA and a configured model. Approve the plan, let the agent sense and operate a small test case, and ensure it calls `save_recipe` after verification.
+11. Click **Save workflow configuration**. Confirm the name appears in **Saved workflow configuration**, select it again, and verify fields, steps and reference captures reload.
+12. Click **Prepare instructions** to inspect the resulting run contract. Use **Copy instructions** if needed.
+13. Select one-time, multi-slot daily, selected-day weekly, interval or HTTP-change timing. Click **Create autonomous job** only after a supervised replay passes. The scheduled agent resolves the credential profile inside GUI_Operate and reports evidence/postcondition status.
 
 Use the downloadable [workflow brief](user-guide-templates/rpa-workflow-brief.md) for process ownership, sample inputs, exception cases and sign-off.
 
@@ -377,6 +380,8 @@ Use the chat tool `infra_capabilities` to inspect the supported read-only catego
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
 | Only Enable/Disable appears                      | Expand **Configure a business workflow**; if absent, update/restart the app build                                                                                  | RPA-01          |
 | Workflow form resets after closing Settings      | Click **Save workflow configuration**, then confirm it appears in the saved-workflow selector; saving credentials or preparing instructions does not save the form | RPA-04          |
+| No executable process appears after form save    | Add steps and click **Save executable recipe**, or use **Start guided recording in chat** and confirm the agent calls `save_recipe`                                | RPA-04 / RPA-06 |
+| Reference screenshot is missing after capture    | Confirm RPA is Connected, macOS Screen Recording or the equivalent platform permission is granted, then save the workflow configuration                            | RPA-02 / RPA-04 |
 | Review setup in chat unavailable                 | Confirm RPA Connected and provider/model configured; complete required brief fields                                                                                | RPA-04          |
 | Screenshot fails or is blank                     | Confirm intended display, app/window availability and macOS screen permission for the actual running app/helper; follow restart prompts                            | RPA-02          |
 | Screenshot works but vision fails                | Check image support, API route, credentials, quotas and model errors; a working text model is insufficient                                                         | RPA-03          |
@@ -418,18 +423,18 @@ Run these in an approved test environment. The procedures below are **tests to e
 
 ### RPA test cases
 
-| ID     | Steps                                                                                           | Expected result / evidence                                                                                      |
-| ------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| RPA-01 | Enable RPA; call `get_runtime_status`; list saved recipes without running one                   | Connected; runtime ready with expected platform backends; actual recipe-list result, possibly empty             |
-| RPA-02 | Call `get_displays`; capture a fresh test-app screenshot                                        | Intended display and current readable screen; no unrelated secrets in retained evidence                         |
-| RPA-03 | Ask vision to identify a known visible label without clicking                                   | Correct label/target; provider request succeeds. Wrong/ambiguous answer is a failure                            |
-| RPA-04 | Fill the workflow form with a known success check; Prepare; Review setup in chat                | Required data reaches the new setup conversation; plan review precedes operation; no false “recipe saved” claim |
-| RPA-05 | Type a unique marker into a blank test document and save a new file                             | Only the intended test document changes; reopened file matches expected contents                                |
-| RPA-06 | Record/save/list a new recipe; restore starting state; replay with a different test input       | Saved name exists; replay uses supplied values; independently checked output matches                            |
-| RPA-07 | Move the test window and replay; then make a required target unavailable                        | Correct relocation when possible; missing target stops/reports failure instead of clicking stale coordinates    |
-| RPA-08 | For remote workflows, verify the test host/session; repeat after a controlled reconnect         | Remote identity and starting state rechecked; no actions on the wrong session                                   |
-| RPA-09 | Run sample report/draft inputs including duplicate and missing records; reopen outputs          | IDs, dates, counts/totals and duplicate handling match the baseline; uncertain outcomes stop                    |
-| RPA-10 | In a disposable test, request emergency stop; attempt a guarded GUI action; resume deliberately | Subsequent guarded action refused while stopped; recovery does not claim to undo an already completed action    |
+| ID     | Steps                                                                                           | Expected result / evidence                                                                                   |
+| ------ | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| RPA-01 | Enable RPA; call `get_runtime_status`; list saved recipes without running one                   | Connected; runtime ready with expected platform backends; actual recipe-list result, possibly empty          |
+| RPA-02 | Call `get_displays`; capture a fresh test-app screenshot                                        | Intended display and current readable screen; no unrelated secrets in retained evidence                      |
+| RPA-03 | Ask vision to identify a known visible label without clicking                                   | Correct label/target; provider request succeeds. Wrong/ambiguous answer is a failure                         |
+| RPA-04 | Save/reload a workflow with defined steps and a reference capture; start guided recording       | Fields, ordered steps and retained capture reload; required data reaches chat; no false execution claim      |
+| RPA-05 | Type a unique marker into a blank test document and save a new file                             | Only the intended test document changes; reopened file matches expected contents                             |
+| RPA-06 | Record/save/list a new recipe; restore starting state; replay with a different test input       | Saved name exists; replay uses supplied values; independently checked output matches                         |
+| RPA-07 | Move the test window and replay; then make a required target unavailable                        | Correct relocation when possible; missing target stops/reports failure instead of clicking stale coordinates |
+| RPA-08 | For remote workflows, verify the test host/session; repeat after a controlled reconnect         | Remote identity and starting state rechecked; no actions on the wrong session                                |
+| RPA-09 | Run sample report/draft inputs including duplicate and missing records; reopen outputs          | IDs, dates, counts/totals and duplicate handling match the baseline; uncertain outcomes stop                 |
+| RPA-10 | In a disposable test, request emergency stop; attempt a guarded GUI action; resume deliberately | Subsequent guarded action refused while stopped; recovery does not claim to undo an already completed action |
 
 ### Operational test cases and acceptance decision
 

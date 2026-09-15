@@ -60,7 +60,13 @@ describe('RPA workflow setup handoff', () => {
       trigger: 'manual',
       credentialProfile: 'hrms-service-account',
       scheduleAt: '',
+      scheduleTimes: [],
+      scheduleWeekdays: [],
+      repeatEvery: 1,
+      repeatUnit: 'hour',
       watchUrl: '',
+      definedSteps: [],
+      referenceScreenshots: [],
     });
     expect(normalized).not.toHaveProperty('password');
   });
@@ -72,5 +78,35 @@ describe('RPA workflow setup handoff', () => {
     expect(() => normalizeRpaWorkflowBrief({ ...brief, trigger: 'invalid' as 'manual' })).toThrow(
       'valid trigger'
     );
+  });
+
+  it('normalizes advanced daily scheduling and includes defined process context', () => {
+    const normalized = normalizeRpaWorkflowBrief({
+      ...brief,
+      trigger: 'daily',
+      scheduleTimes: ['22:30', '08:00', '22:30', 'invalid'],
+      definedSteps: [
+        {
+          id: 'step-1',
+          action: 'click',
+          target: 'Export button',
+          value: '',
+          notes: 'download report',
+        },
+      ],
+      referenceScreenshots: [
+        {
+          id: 'screen-1',
+          path: '/managed/reference.png',
+          description: 'Filters selected',
+          capturedAt: 123,
+        },
+      ],
+    });
+    expect(normalized.scheduleTimes).toEqual(['08:00', '22:30']);
+    const prompt = buildRpaWorkflowPrompt(normalized);
+    expect(prompt).toContain('Export button');
+    expect(prompt).toContain('/managed/reference.png');
+    expect(prompt).toContain('08:00, 22:30');
   });
 });
