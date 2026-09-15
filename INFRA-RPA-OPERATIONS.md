@@ -68,10 +68,11 @@ Example chat requests:
 2. Open the intended app, account and tenant. Sign in manually. On macOS grant Accessibility and Screen Recording permissions when prompted. Ensure the execution desktop is available and unlocked.
 3. Expand **Configure a business workflow**. Give the task a unique name and select local desktop, website, or Remote Desktop/Citrix.
 4. Enter the application/URL/remote host, input parameters, ordered business steps and a concrete success check. Save an encrypted credential profile in the form when autonomous login is required; passwords and OTPs never enter the prompt or recipe.
-5. Choose **Prepare instructions** to inspect/copy the brief, or **Review setup in chat** to start a planning conversation. Review the proposed plan before application operations.
-6. Run a small sample against a test account. For desktop primitives, ask the agent to record each supported step and save a named recipe. Recording is agent-mediated; the connector is not a passive global recorder of everything you do with the mouse.
-7. Replay with representative inputs and after moving the window. Re-open the resulting record/file and compare business values with the expected result.
-8. Select **UI**, **Background** or **Headless** execution mode. Headless is only for browser/API workflows; GUI recipes need an available desktop. Use **Create autonomous job** for a daily schedule or HTTP change trigger, or manage the same task under **Settings → Schedule**. Enable **Autonomous Mode** for unattended safe tools. Interactive MFA, a missing profile, unexpected dialogs or required approvals stop the job safely.
+5. Click **Save workflow configuration**. Confirm the workflow appears under **Saved workflow configuration** and can be reloaded. This saves the form only; it does not create a recipe or scheduled job.
+6. Choose **Prepare instructions** to inspect/copy the brief, or **Review setup in chat** to start a planning conversation. Review the proposed plan before application operations.
+7. Run a small sample against a test account. For desktop primitives, ask the agent to record each supported step and save a named recipe. Recording is agent-mediated; the connector is not a passive global recorder of everything you do with the mouse.
+8. Replay with representative inputs and after moving the window. Re-open the resulting record/file and compare business values with the expected result.
+9. Select **UI**, **Background** or **Headless** execution mode. Headless is only for browser/API workflows; GUI recipes need an available desktop. Use **Create autonomous job** for a daily schedule or HTTP change trigger, or manage the same task under **Settings → Schedule**. Enable **Autonomous Mode** for unattended safe tools. Interactive MFA, a missing profile, unexpected dialogs or required approvals stop the job safely.
 
 Platform setup:
 

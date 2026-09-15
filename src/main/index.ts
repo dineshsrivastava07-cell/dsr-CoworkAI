@@ -74,6 +74,7 @@ import {
 import { startInfraRcaBroker, stopInfraRcaBroker } from './mcp/infra-rca-broker';
 import { infraRcaStore } from './mcp/infra-rca-store';
 import { rpaCredentialStore } from './mcp/rpa-credential-store';
+import { rpaWorkflowStore } from './mcp/rpa-workflow-store';
 import { checkInfraConnection } from './mcp/infra-connection-check';
 import {
   ScheduledTaskManager,
@@ -2402,6 +2403,34 @@ ipcMain.handle('rpaCredentials.delete', async (_event, name: string) => {
   } catch (error) {
     logError('[RPA] Failed to delete credential profile:', error);
     return { success: false, error: 'Failed to delete credential profile.' };
+  }
+});
+
+ipcMain.handle('rpaWorkflows.list', () => rpaWorkflowStore.list());
+ipcMain.handle(
+  'rpaWorkflows.save',
+  (_event, workflow: Parameters<typeof rpaWorkflowStore.save>[0]) => {
+    try {
+      return { success: true, workflow: rpaWorkflowStore.save(workflow) };
+    } catch (error) {
+      logError('[RPA] Failed to save workflow configuration:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to save workflow configuration.',
+      };
+    }
+  }
+);
+ipcMain.handle('rpaWorkflows.delete', (_event, name: string) => {
+  try {
+    rpaWorkflowStore.delete(name);
+    return { success: true };
+  } catch (error) {
+    logError('[RPA] Failed to delete workflow configuration:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to delete workflow configuration.',
+    };
   }
 });
 

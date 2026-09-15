@@ -378,10 +378,13 @@ DVR/camera (ONVIF) support is intentionally not built — no vendor/model was sp
 
 RPA is opt-in through **Settings → MCP Connectors → RPA / Desktop automation → Enable RPA**. The card reuses an existing `GUI_Operate` configuration or creates the bundled preset, then saves through `mcp.saveServer`. The main process connects the server, discovers tools, and invalidates cached agent sessions. Disabling disconnects the connector; the saved disabled configuration persists across restarts. The card reports connection state and tool count, and refreshes the saved state after a connection failure.
 
-`RpaWorkflowSetup` collects a business brief plus execution mode, encrypted credential-profile reference and manual/schedule/watch trigger. `buildRpaWorkflowPrompt` translates it into an agentic run contract carrying inputs, steps and application-level success checks. **Review setup in chat** uses the existing `useIPC.startSession` path for the initial supervised recording; **Create autonomous job** persists a daily or HTTP change-triggered scheduled agent task through the existing scheduler. The scheduled agent invokes the saved recipe, resolves credentials inside the GUI connector, captures before/after evidence and reports postcondition status. Headless mode is explicitly rejected for GUI recipes; browser/API workflows must use their native tools.
+`RpaWorkflowSetup` collects a business brief plus execution mode, encrypted credential-profile reference and manual/schedule/watch trigger. **Save workflow configuration** writes the normalized definition to the encrypted `rpa-workflows` Electron store through typed preload IPC, then lets the operator reload or delete it. The stored definition contains only the credential-profile name; passwords remain in the separate encrypted credential store. `buildRpaWorkflowPrompt` translates the definition into an agentic run contract carrying inputs, steps and application-level success checks. **Review setup in chat** uses the existing `useIPC.startSession` path for the initial supervised recording; **Create autonomous job** persists a daily or HTTP change-triggered scheduled agent task through the existing scheduler. The scheduled agent invokes the saved recipe, resolves credentials inside the GUI connector, captures before/after evidence and reports postcondition status. Headless mode is explicitly rejected for GUI recipes; browser/API workflows must use their native tools.
 
 ```mermaid
 flowchart LR
+    FORM[Workflow form] -->|Save / list / delete| WFIPC[rpaWorkflows IPC]
+    WFIPC --> WFSTORE[(Encrypted workflow store)]
+    WFSTORE --> FORM
     UI[Settings: Enable / Disable RPA] --> IPC[mcp.saveServer]
     IPC --> STORE[MCP config store]
     IPC --> MGR[MCPManager.updateServer]

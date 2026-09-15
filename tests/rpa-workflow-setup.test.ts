@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildRpaWorkflowPrompt, type RpaWorkflowBrief } from '../src/shared/rpa-workflow';
+import {
+  buildRpaWorkflowPrompt,
+  normalizeRpaWorkflowBrief,
+  type RpaWorkflowBrief,
+} from '../src/shared/rpa-workflow';
 const brief: RpaWorkflowBrief = {
   name: 'Attendance',
   surface: 'web',
@@ -38,5 +42,35 @@ describe('RPA workflow setup handoff', () => {
     expect(prompt).toContain('invoke the saved recipe autonomously');
     expect(prompt).toContain('postcondition');
     expect(prompt).not.toContain('password:');
+  });
+
+  it('normalizes a persistable workflow configuration without credential secrets', () => {
+    const normalized = normalizeRpaWorkflowBrief({
+      ...brief,
+      password: 'must-not-be-persisted',
+      name: '  Attendance  ',
+      application: ' HRMS test tenant ',
+      credentialProfile: ' hrms-service-account ',
+    } as RpaWorkflowBrief & { password: string });
+    expect(normalized).toEqual({
+      ...brief,
+      name: 'Attendance',
+      application: 'HRMS test tenant',
+      executionMode: 'ui',
+      trigger: 'manual',
+      credentialProfile: 'hrms-service-account',
+      scheduleAt: '',
+      watchUrl: '',
+    });
+    expect(normalized).not.toHaveProperty('password');
+  });
+
+  it('rejects invalid persisted execution and trigger values', () => {
+    expect(() => normalizeRpaWorkflowBrief({ ...brief, executionMode: 'invalid' as 'ui' })).toThrow(
+      'valid execution mode'
+    );
+    expect(() => normalizeRpaWorkflowBrief({ ...brief, trigger: 'invalid' as 'manual' })).toThrow(
+      'valid trigger'
+    );
   });
 });

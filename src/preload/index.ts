@@ -46,6 +46,7 @@ import type {
   PairingRequest,
   RemoteSessionMapping,
 } from '../shared/ipc-types';
+import type { RpaWorkflowBrief, SavedRpaWorkflowConfiguration } from '../shared/rpa-workflow';
 
 // Track registered callbacks to prevent duplicate listeners
 let registeredCallback: ((event: ServerEvent) => void) | null = null;
@@ -290,6 +291,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('rpaCredentials.save', profile),
     delete: (name: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('rpaCredentials.delete', name),
+  },
+
+  rpaWorkflows: {
+    list: (): Promise<SavedRpaWorkflowConfiguration[]> => ipcRenderer.invoke('rpaWorkflows.list'),
+    save: (
+      workflow: RpaWorkflowBrief
+    ): Promise<{
+      success: boolean;
+      workflow?: SavedRpaWorkflowConfiguration;
+      error?: string;
+    }> => ipcRenderer.invoke('rpaWorkflows.save', workflow),
+    delete: (name: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('rpaWorkflows.delete', name),
   },
 
   // Skills methods
@@ -614,6 +628,15 @@ declare global {
       rpaCredentials: {
         list: () => Promise<RpaCredentialProfilePublic[]>;
         save: (profile: RpaCredentialProfileInput) => Promise<{ success: boolean; error?: string }>;
+        delete: (name: string) => Promise<{ success: boolean; error?: string }>;
+      };
+      rpaWorkflows: {
+        list: () => Promise<SavedRpaWorkflowConfiguration[]>;
+        save: (workflow: RpaWorkflowBrief) => Promise<{
+          success: boolean;
+          workflow?: SavedRpaWorkflowConfiguration;
+          error?: string;
+        }>;
         delete: (name: string) => Promise<{ success: boolean; error?: string }>;
       };
       skills: {

@@ -1,39 +1,146 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useIPC } from '../../hooks/useIPC';
 import { useAppStore } from '../../store';
-import { buildRpaWorkflowPrompt, type RpaWorkflowBrief } from '../../../shared/rpa-workflow';
+import {
+  buildRpaWorkflowPrompt,
+  type RpaWorkflowBrief,
+  type SavedRpaWorkflowConfiguration,
+} from '../../../shared/rpa-workflow';
 import type { ScheduleCreateInput } from '../../types';
 
 const inputClass =
   'w-full px-3 py-2 mt-1 rounded bg-background border border-border text-sm text-text-primary';
+const emptyBrief: RpaWorkflowBrief = {
+  name: '',
+  surface: 'desktop',
+  application: '',
+  inputs: '',
+  steps: '',
+  successCheck: '',
+  executionMode: 'ui',
+  trigger: 'manual',
+  credentialProfile: '',
+  scheduleAt: '',
+  watchUrl: '',
+};
+
+function savedWorkflowToBrief(workflow: SavedRpaWorkflowConfiguration): RpaWorkflowBrief {
+  return {
+    name: workflow.name,
+    surface: workflow.surface,
+    application: workflow.application,
+    inputs: workflow.inputs,
+    steps: workflow.steps,
+    successCheck: workflow.successCheck,
+    executionMode: workflow.executionMode,
+    trigger: workflow.trigger,
+    credentialProfile: workflow.credentialProfile,
+    scheduleAt: workflow.scheduleAt,
+    watchUrl: workflow.watchUrl,
+  };
+}
+
 export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
   const { startSession } = useIPC();
   const configured = useAppStore((state) => state.isConfigured);
   const workingDir = useAppStore((state) => state.workingDir);
-  const [brief, setBrief] = useState<RpaWorkflowBrief>({
-    name: '',
-    surface: 'desktop',
-    application: '',
-    inputs: '',
-    steps: '',
-    successCheck: '',
-    executionMode: 'ui',
-    trigger: 'manual',
-    credentialProfile: '',
-    scheduleAt: '',
-    watchUrl: '',
-  });
+  const [brief, setBrief] = useState<RpaWorkflowBrief>(emptyBrief);
+  const [savedWorkflows, setSavedWorkflows] = useState<SavedRpaWorkflowConfiguration[]>([]);
+  const [selectedWorkflow, setSelectedWorkflow] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [status, setStatus] = useState('');
   const [draft, setDraft] = useState('');
   const [copied, setCopied] = useState(false);
   const [credentialUsername, setCredentialUsername] = useState('');
   const [credentialPassword, setCredentialPassword] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    void window.electronAPI.rpaWorkflows
+      .list()
+      .then((workflows) => {
+        if (active) setSavedWorkflows(workflows);
+      })
+      .catch((err) => {
+        if (active) {
+          setError(err instanceof Error ? err.message : 'Could not load saved workflows.');
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   function change(key: keyof RpaWorkflowBrief, value: string) {
     setBrief({ ...brief, [key]: value });
+    if (key === 'name' && value.trim() !== selectedWorkflow) setSelectedWorkflow('');
     setDraft('');
     setCopied(false);
     setError('');
+    setStatus('');
+  }
+
+  function selectSavedWorkflow(name: string) {
+    setSelectedWorkflow(name);
+    setError('');
+    setStatus('');
+    setDraft('');
+    if (!name) {
+      setBrief(emptyBrief);
+      return;
+    }
+    const saved = savedWorkflows.find((workflow) => workflow.name === name);
+    if (saved) {
+      setBrief(savedWorkflowToBrief(saved));
+    }
+  }
+
+  async function saveWorkflowConfiguration() {
+    setBusy(true);
+    setError('');
+    setStatus('');
+    try {
+      const result = await window.electronAPI.rpaWorkflows.save(brief);
+      if (!result.success || !result.workflow) {
+        throw new Error(result.error || 'Could not save workflow configuration.');
+      }
+      const saved = result.workflow;
+      setSavedWorkflows((current) => [
+        saved,
+        ...current.filter((workflow) => workflow.name.toLowerCase() !== saved.name.toLowerCase()),
+      ]);
+      setBrief(savedWorkflowToBrief(saved));
+      setSelectedWorkflow(saved.name);
+      setStatus(`Workflow configuration “${saved.name}” saved.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save workflow configuration.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteWorkflowConfiguration() {
+    if (!selectedWorkflow) return;
+    if (!window.confirm(`Delete the saved workflow configuration “${selectedWorkflow}”?`)) return;
+    setBusy(true);
+    setError('');
+    setStatus('');
+    try {
+      const result = await window.electronAPI.rpaWorkflows.delete(selectedWorkflow);
+      if (!result.success)
+        throw new Error(result.error || 'Could not delete workflow configuration.');
+      setSavedWorkflows((current) =>
+        current.filter((workflow) => workflow.name !== selectedWorkflow)
+      );
+      setBrief(emptyBrief);
+      setSelectedWorkflow('');
+      setStatus('Workflow configuration deleted.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete workflow configuration.');
+    } finally {
+      setBusy(false);
+    }
   }
   function prepare() {
     try {
@@ -112,6 +219,7 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
       setDraft(
         `${prompt}\n\nAutonomous job created. Finish and save the recipe as "${brief.name.trim()}" before the first run.`
       );
+      setStatus('Autonomous job created.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create autonomous job.');
     } finally {
@@ -135,7 +243,7 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
       });
       if (!result.success) throw new Error(result.error || 'Could not save credential profile.');
       setCredentialPassword('');
-      setDraft(
+      setStatus(
         'Credential profile saved in the encrypted local store. The password is never placed in the workflow prompt or recipe.'
       );
     } catch (err) {
@@ -177,6 +285,31 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
           </li>
         </ol>
         <fieldset disabled={busy} className="space-y-3">
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+            <label className="block text-xs text-text-secondary">
+              Saved workflow configuration
+              <select
+                className={inputClass}
+                value={selectedWorkflow}
+                onChange={(e) => selectSavedWorkflow(e.target.value)}
+              >
+                <option value="">New workflow</option>
+                {savedWorkflows.map((workflow) => (
+                  <option key={workflow.name} value={workflow.name}>
+                    {workflow.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={!selectedWorkflow || busy}
+              onClick={() => void deleteWorkflowConfiguration()}
+              className="px-3 py-2 rounded bg-surface-muted text-sm text-error disabled:opacity-50"
+            >
+              Delete saved workflow
+            </button>
+          </div>
           <label className="block text-xs text-text-secondary">
             Workflow name
             <input
@@ -344,6 +477,14 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
           <div className="flex gap-2 flex-wrap">
             <button
               type="button"
+              disabled={busy}
+              onClick={() => void saveWorkflowConfiguration()}
+              className="px-3 py-2 rounded bg-accent text-white text-sm disabled:opacity-50"
+            >
+              {busy ? 'Saving…' : 'Save workflow configuration'}
+            </button>
+            <button
+              type="button"
               onClick={prepare}
               className="px-3 py-2 rounded bg-surface-muted text-sm text-text-primary"
             >
@@ -353,7 +494,7 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
               type="button"
               disabled={!connected || !configured || busy}
               onClick={() => void reviewInChat()}
-              className="px-3 py-2 rounded bg-accent text-white text-sm disabled:opacity-50"
+              className="px-3 py-2 rounded bg-accent/80 text-white text-sm disabled:opacity-50"
             >
               {busy ? 'Starting…' : 'Review setup in chat'}
             </button>
@@ -376,6 +517,11 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
         {error && (
           <p role="alert" className="text-xs text-error">
             {error}
+          </p>
+        )}
+        {status && (
+          <p role="status" className="text-xs text-success">
+            {status}
           </p>
         )}
         {draft && (
@@ -404,9 +550,10 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
           </div>
         )}
         <p className="text-xs text-text-muted">
-          Saved desktop recipes are managed in chat: ask the agent to record the named workflow,
-          test it on a small sample, then save it. A scheduled job starts a new agent session, calls
-          the saved recipe, captures evidence and checks the business result. Enable
+          Workflow configuration saves this form for reuse and does not create a recipe or a job.
+          Desktop recipes are managed in chat: ask the agent to record the named workflow, test it
+          on a small sample, then save it. A scheduled job starts a new agent session, calls the
+          saved recipe, captures evidence and checks the business result. Enable
           <strong> Autonomous Mode </strong> in General settings for unattended safe tools;
           irreversible actions still require explicit approval. Use <code>emergency_stop</code> to
           stop GUI actions.
