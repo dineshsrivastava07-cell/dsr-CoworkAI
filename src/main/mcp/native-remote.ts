@@ -28,9 +28,31 @@ async function probe(host: string, port: number, timeoutMs = 2500): Promise<void
   });
 }
 
-function runDetached(command: string, args: string[]): void {
-  const child = spawn(command, args, { detached: true, stdio: 'ignore' });
-  child.unref();
+function runDetached(command: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+    child.once('error', reject);
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
+function runOpen(args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile('open', args, { timeout: 10_000 }, (error, _stdout, stderr) => {
+      if (error) {
+        reject(new Error(stderr.trim() || error.message));
+      } else resolve();
+    });
+  });
+}
+
+function macAppAvailable(name: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile('open', ['-Ra', name], { timeout: 5000 }, (error) => resolve(!error));
+  });
 }
 
 function which(command: string): Promise<boolean> {
@@ -52,7 +74,7 @@ async function launchLinux(protocol: InfraNativeRemoteProtocol, host: string, po
         ];
   for (const [command, args] of candidates) {
     if (await which(command)) {
-      runDetached(command, args);
+      await runDetached(command, args);
       return command;
     }
   }
@@ -76,8 +98,8 @@ export async function openNativeRemoteDesktop(
   await probe(target.host, port);
 
   if (process.platform === 'win32') {
-    if (protocol === 'rdp') runDetached('mstsc.exe', [`/v:${target.host}:${port}`]);
-    else runDetached('explorer.exe', [`vnc://${target.host}:${port}`]);
+    if (protocol === 'rdp') await runDetached('mstsc.exe', [`/v:${target.host}:${port}`]);
+    else await runDetached('explorer.exe', [`vnc://${target.host}:${port}`]);
     return {
       launched: true,
       protocol,
@@ -87,9 +109,32 @@ export async function openNativeRemoteDesktop(
     };
   }
   if (process.platform === 'darwin') {
-    if (protocol === 'vnc')
-      runDetached('open', ['-a', 'Screen Sharing', `vnc://${target.host}:${port}`]);
-    else runDetached('open', [`rdp://full%20address=s:${target.host}:${port}`]);
+    if (protocol === 'vnc') {
+      if (!(await macAppAvailable('Screen Sharing')))
+        throw new Error('macOS Screen Sharing is not available on this workstation.');
+      await runOpen(['-a', 'Screen Sharing', `vnc://${target.host}:${port}`]);
+    } else {
+      const rdpApp = (await macAppAvailable('Windows App'))
+        ? 'Windows App'
+        : (await macAppAvailable('Microsoft Remote Desktop'))
+          ? 'Microsoft Remote Desktop'
+          : undefined;
+      if (!rdpApp) {
+        let vncReachable = false;
+        try {
+          await probe(target.host, 5900, 1000);
+          vncReachable = true;
+        } catch {
+          // Report the missing RDP client below.
+        }
+        throw new Error(
+          vncReachable
+            ? 'No macOS RDP client found, but VNC is reachable on port 5900. Select VNC / Screen Sharing for this target.'
+            : 'No macOS RDP client found. Install Microsoft Windows App or Microsoft Remote Desktop, or configure VNC / Screen Sharing on the target.'
+        );
+      }
+      await runOpen(['-a', rdpApp, `rdp://full%20address=s:${target.host}:${port}`]);
+    }
     return {
       launched: true,
       protocol,

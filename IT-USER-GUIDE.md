@@ -373,6 +373,8 @@ The advanced connection check inspects the selected OS route, probes both standa
 
 Host targets expose a **Remote** action next to **Test**. Configure **Native remote** as RDP or VNC/Screen Sharing and set the target port when it differs from the default (`3389` for RDP, `5900` for VNC). V-Coworker performs a bounded TCP preflight and then launches the operating system client without putting credentials on a command line: `mstsc.exe` on Windows, Screen Sharing/VNC or an installed RDP client on macOS, and `xfreerdp`, Remmina, TigerVNC or Vinagre on Linux. The client prompts for credentials and consent according to local policy. A successful launch is not a logged-in or completed diagnostic; verify the remote host identity and screen/session state before running GUI automation.
 
+On macOS, Microsoft RDP is not built into the operating system. Install Microsoft Windows App/Microsoft Remote Desktop for RDP, or select **VNC / Screen Sharing** when the target exposes a VNC listener. If an RDP client is missing but VNC `5900` is reachable, the Remote action reports that exact fallback instead of claiming that a session started.
+
 1. Confirm the inventory address with the Windows owner. Test from the computer running V-Coworker, because another workstation may have different network access. On macOS, use the following read-only check, replacing the placeholder:
 
    ```bash
