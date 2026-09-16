@@ -19,6 +19,7 @@ Built on top of the Electron + React stack, V-Coworker gives you:
 - One-click MCP (Model Context Protocol) tool integration, plus six bundled first-party MCP servers (see below)
 - RPA recipes — record semantic desktop actions once, bind an encrypted credential profile, capture before/after evidence, and replay them through autonomous scheduled or HTTP-triggered agent jobs
 - Advanced remote infrastructure RCA — diagnose Linux/Windows servers, network gear, printers, UPS, and databases over SSH/WinRM/SNMP/DB, with explicit WinRM Basic/NTLM/HTTPS or native-ticket Kerberos settings, expert quick/full health assessments, read-only lookup queries, and proposed fixes that auto-verify after approval
+- Native remote desktop launch — open Windows RDP, macOS Screen Sharing/VNC, or installed Linux RDP/VNC clients from an SSH/WinRM host target after a bounded port preflight; credentials remain in the native client
 - Roadmap & Gantt generation — from an existing workbook, or from a plain-language description alone
 - Skill protocols — reusable AI workflows
 - Sandbox isolation (Lima on macOS, WSL on Windows)

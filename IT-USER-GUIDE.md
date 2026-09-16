@@ -369,6 +369,10 @@ Replace the host and port for your approved endpoint. `TcpTestSucceeded` is a ne
 
 The advanced connection check inspects the selected OS route, probes both standard WinRM listeners, checks Windows RPC/SMB/RDP only to distinguish a reachable Windows host from a missing WinRM listener, and performs an authenticated read-only WS-Man probe after the configured listener answers. Expand **Port and service probes**, **Windows IT checks (read-only)** and, when offered, **Administrator repair**. The repair block is never executed by Test. The chat tool `infra_ping_check` uses the same staged check and reports failed readiness as a tool error; SNMP targets use a read-only SNMP probe.
 
+### Native remote desktop
+
+Host targets expose a **Remote** action next to **Test**. Configure **Native remote** as RDP or VNC/Screen Sharing and set the target port when it differs from the default (`3389` for RDP, `5900` for VNC). V-Coworker performs a bounded TCP preflight and then launches the operating system client without putting credentials on a command line: `mstsc.exe` on Windows, Screen Sharing/VNC or an installed RDP client on macOS, and `xfreerdp`, Remmina, TigerVNC or Vinagre on Linux. The client prompts for credentials and consent according to local policy. A successful launch is not a logged-in or completed diagnostic; verify the remote host identity and screen/session state before running GUI automation.
+
 1. Confirm the inventory address with the Windows owner. Test from the computer running V-Coworker, because another workstation may have different network access. On macOS, use the following read-only check, replacing the placeholder:
 
    ```bash

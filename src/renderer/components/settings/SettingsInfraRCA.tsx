@@ -1,5 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { AlertCircle, ChevronDown, Loader2, Pencil, Plus, Server, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  ChevronDown,
+  Loader2,
+  Monitor,
+  Pencil,
+  Plus,
+  Server,
+  Trash2,
+} from 'lucide-react';
 import type {
   InfraRcaProtocol,
   InfraRcaTargetInput,
@@ -32,6 +41,7 @@ const emptyForm: InfraRcaTargetInput = {
   winrmTransport: 'https',
   winrmAuth: 'auto',
   winrmRejectUnauthorized: true,
+  remoteDesktop: 'vnc',
 };
 
 export function SettingsInfraRCA({
@@ -53,6 +63,7 @@ export function SettingsInfraRCA({
   const [form, setForm] = useState<InfraRcaTargetInput>(emptyForm);
   const [isSaving, setIsSaving] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [remoteId, setRemoteId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, InfraRcaConnectionResult>>({});
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -112,6 +123,19 @@ export function SettingsInfraRCA({
     }
   }
 
+  async function handleOpenNativeRemote(target: InfraRcaTargetPublic) {
+    setError('');
+    setRemoteId(target.id);
+    try {
+      const result = await window.electronAPI.infraRca.openNativeRemote(target.id);
+      if (!result.launched) setError(result.error || 'Native remote desktop could not be opened.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Native remote desktop could not be opened.');
+    } finally {
+      setRemoteId(null);
+    }
+  }
+
   function handleEdit(target: InfraRcaTargetPublic) {
     setError('');
     setForm({
@@ -125,6 +149,8 @@ export function SettingsInfraRCA({
       winrmTransport: target.winrmTransport || 'https',
       winrmAuth: target.winrmAuth || 'auto',
       winrmRejectUnauthorized: target.winrmRejectUnauthorized !== false,
+      remoteDesktop: target.remoteDesktop || (target.protocol === 'winrm' ? 'rdp' : 'vnc'),
+      remotePort: target.remotePort,
     });
     setShowAddForm(true);
   }
@@ -271,6 +297,21 @@ export function SettingsInfraRCA({
                         'Test'
                       )}
                     </button>
+                    {target.protocol !== 'snmp' && target.protocol !== 'db' && (
+                      <button
+                        onClick={() => void handleOpenNativeRemote(target)}
+                        disabled={remoteId === target.id}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-surface-muted hover:bg-surface-active text-text-secondary disabled:opacity-50"
+                        title="Open the operating system's native RDP or VNC client"
+                      >
+                        {remoteId === target.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Monitor className="w-3 h-3" />
+                        )}
+                        Remote
+                      </button>
+                    )}
                     <button
                       onClick={() => handleEdit(target)}
                       className="p-1 rounded-md hover:bg-surface-active text-text-muted hover:text-text-primary"
@@ -366,6 +407,42 @@ export function SettingsInfraRCA({
                 </div>
               ) : (
                 <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="text-xs font-medium text-text-primary">
+                      Native remote
+                      <select
+                        value={form.remoteDesktop || (form.protocol === 'winrm' ? 'rdp' : 'vnc')}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            remoteDesktop: e.target.value as InfraRcaTargetInput['remoteDesktop'],
+                            remotePort: undefined,
+                          })
+                        }
+                        className="mt-1 w-full px-3 py-2 rounded-lg bg-background border border-border text-text-primary text-sm"
+                      >
+                        <option value="rdp">RDP</option>
+                        <option value="vnc">VNC / Screen Sharing</option>
+                      </select>
+                    </label>
+                    <label className="text-xs font-medium text-text-primary">
+                      Remote port
+                      <input
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={form.remotePort ?? ''}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            remotePort: e.target.value ? Number(e.target.value) : undefined,
+                          })
+                        }
+                        placeholder={form.remoteDesktop === 'rdp' ? '3389' : '5900'}
+                        className="mt-1 w-full px-3 py-2 rounded-lg bg-background border border-border text-text-primary text-sm font-mono"
+                      />
+                    </label>
+                  </div>
                   <div>
                     <label className="block text-xs font-medium text-text-primary mb-1">
                       Username

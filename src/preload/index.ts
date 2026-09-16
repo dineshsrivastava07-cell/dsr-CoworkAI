@@ -38,6 +38,7 @@ import type {
   InfraRcaImportInput,
   InfraRcaImportResult,
   InfraRcaConnectionResult,
+  InfraNativeRemoteLaunchResult,
   RpaCredentialProfileInput,
   RpaCredentialProfilePublic,
   RemoteConfig,
@@ -289,6 +290,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('infraRca.deleteTarget', id),
     testConnection: (id: string): Promise<InfraRcaConnectionResult> =>
       ipcRenderer.invoke('infraRca.testConnection', id),
+    openNativeRemote: (id: string): Promise<InfraNativeRemoteLaunchResult> =>
+      ipcRenderer.invoke('infraRca.openNativeRemote', id),
   },
 
   rpaCredentials: {
@@ -654,6 +657,7 @@ declare global {
         ) => Promise<{ success: boolean; id?: string; error?: string }>;
         deleteTarget: (id: string) => Promise<{ success: boolean; error?: string }>;
         testConnection: (id: string) => Promise<InfraRcaConnectionResult>;
+        openNativeRemote: (id: string) => Promise<InfraNativeRemoteLaunchResult>;
       };
       rpaCredentials: {
         list: () => Promise<RpaCredentialProfilePublic[]>;

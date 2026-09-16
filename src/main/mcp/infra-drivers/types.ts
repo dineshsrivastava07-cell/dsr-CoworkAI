@@ -58,6 +58,8 @@ export interface TargetCredentials {
   winrmTransport?: 'http' | 'https';
   winrmAuth?: 'basic' | 'ntlm' | 'kerberos' | 'auto';
   winrmRejectUnauthorized?: boolean;
+  remoteDesktop?: 'rdp' | 'vnc';
+  remotePort?: number;
 }
 
 export function worstStatus(metrics: DiagnosticMetric[]): MetricStatus {

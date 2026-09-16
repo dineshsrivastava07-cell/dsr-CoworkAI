@@ -82,6 +82,7 @@ export interface GoogleConnectionStatus {
 export type InfraRcaProtocol = 'ssh' | 'winrm' | 'snmp' | 'db';
 export type InfraRcaWinrmTransport = 'http' | 'https';
 export type InfraRcaWinrmAuth = 'basic' | 'ntlm' | 'kerberos' | 'auto';
+export type InfraNativeRemoteProtocol = 'rdp' | 'vnc';
 
 export interface InfraRcaPortProbe {
   port: number;
@@ -130,6 +131,8 @@ export interface InfraRcaTargetPublic {
   winrmTransport?: InfraRcaWinrmTransport;
   winrmAuth?: InfraRcaWinrmAuth;
   winrmRejectUnauthorized?: boolean;
+  remoteDesktop?: InfraNativeRemoteProtocol;
+  remotePort?: number;
 }
 
 /** Renderer -> main payload for saving a target. Secrets flow one-way into the encrypted store and are never read back. */
@@ -150,6 +153,17 @@ export interface InfraRcaTargetInput {
   winrmTransport?: InfraRcaWinrmTransport;
   winrmAuth?: InfraRcaWinrmAuth;
   winrmRejectUnauthorized?: boolean;
+  remoteDesktop?: InfraNativeRemoteProtocol;
+  remotePort?: number;
+}
+
+export interface InfraNativeRemoteLaunchResult {
+  launched: boolean;
+  protocol: InfraNativeRemoteProtocol;
+  host: string;
+  port: number;
+  client: string;
+  error?: string;
 }
 
 export interface InfraRcaImportInput {

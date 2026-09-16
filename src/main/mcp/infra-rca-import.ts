@@ -20,6 +20,8 @@ const fields = [
   'winrmTransport',
   'winrmAuth',
   'winrmRejectUnauthorized',
+  'remoteDesktop',
+  'remotePort',
 ] as const;
 const headers = new Map(fields.map((field) => [field.toLowerCase(), field]));
 
@@ -119,6 +121,13 @@ export function validateTarget(target: TargetCredentials): void {
     (!Number.isInteger(target.port) || target.port < 1 || target.port > 65535)
   )
     throw new Error('Port must be an integer from 1 to 65535.');
+  if (
+    target.remotePort !== undefined &&
+    (!Number.isInteger(target.remotePort) || target.remotePort < 1 || target.remotePort > 65535)
+  )
+    throw new Error('Remote desktop port must be an integer from 1 to 65535.');
+  if (target.remoteDesktop && !['rdp', 'vnc'].includes(target.remoteDesktop))
+    throw new Error('Remote desktop protocol must be rdp or vnc.');
   if (target.group && target.group.length > 100)
     throw new Error('Group must be at most 100 characters.');
   if (target.protocol !== 'snmp' && !target.username)

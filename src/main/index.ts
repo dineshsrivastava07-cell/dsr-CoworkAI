@@ -85,6 +85,7 @@ import {
   saveDefinedRecipe,
 } from './mcp/rpa-process-studio';
 import { checkInfraConnection } from './mcp/infra-connection-check';
+import { openNativeRemoteDesktop } from './mcp/native-remote';
 import {
   ScheduledTaskManager,
   type ScheduledTaskCreateInput,
@@ -2375,7 +2376,7 @@ ipcMain.handle('google.connectAccount', async () => {
   return result;
 });
 
-ipcMain.handle('google.disconnectAudience', async () => {
+ipcMain.handle('google.disconnectAccount', async () => {
   const result = await disconnectGoogleAccount();
   await setGoogleWorkspaceServerEnabled(false);
   return result;
@@ -2601,6 +2602,19 @@ ipcMain.handle('infraRca.testConnection', async (_event, id: string) => {
     advancedWinrm: full.protocol === 'winrm',
     verifyLogin: full.protocol === 'winrm',
   });
+});
+
+ipcMain.handle('infraRca.openNativeRemote', async (_event, id: string) => {
+  const target = infraRcaStore.getTargetById(id);
+  if (!target) return { launched: false, error: 'Target not found.' };
+  try {
+    return await openNativeRemoteDesktop(target);
+  } catch (error) {
+    return {
+      launched: false,
+      error: error instanceof Error ? error.message : 'Native remote desktop could not be opened.',
+    };
+  }
 });
 
 // Skills API handlers

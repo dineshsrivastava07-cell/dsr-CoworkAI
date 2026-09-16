@@ -24,6 +24,8 @@ export type PublicTargetInfo = Pick<
   | 'winrmTransport'
   | 'winrmAuth'
   | 'winrmRejectUnauthorized'
+  | 'remoteDesktop'
+  | 'remotePort'
 >;
 
 const defaults: InfraRcaStoreShape = { targets: [] };
@@ -71,6 +73,8 @@ class InfraRcaStore {
           winrmTransport,
           winrmAuth,
           winrmRejectUnauthorized,
+          remoteDesktop,
+          remotePort,
         }) => ({
           id,
           name,
@@ -81,6 +85,8 @@ class InfraRcaStore {
           winrmTransport,
           winrmAuth,
           winrmRejectUnauthorized,
+          remoteDesktop,
+          remotePort,
         })
       );
   }
