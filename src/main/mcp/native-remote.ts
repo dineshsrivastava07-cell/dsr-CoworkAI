@@ -127,9 +127,19 @@ export async function openNativeRemoteDesktop(
         } catch {
           // Report the missing RDP client below.
         }
+        if (vncReachable && (await macAppAvailable('Screen Sharing'))) {
+          await runOpen(['-a', 'Screen Sharing', `vnc://${target.host}:5900`]);
+          return {
+            launched: true,
+            protocol: 'vnc',
+            host: target.host,
+            port: 5900,
+            client: 'Screen Sharing (VNC fallback)',
+          };
+        }
         throw new Error(
           vncReachable
-            ? 'No macOS RDP client found, but VNC is reachable on port 5900. Select VNC / Screen Sharing for this target.'
+            ? 'No macOS RDP client found, and Screen Sharing is unavailable. Install Microsoft Windows App or enable a native VNC client.'
             : 'No macOS RDP client found. Install Microsoft Windows App or Microsoft Remote Desktop, or configure VNC / Screen Sharing on the target.'
         );
       }
