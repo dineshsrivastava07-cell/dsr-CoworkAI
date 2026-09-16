@@ -69,12 +69,12 @@ Example chat requests:
 3. Expand **Configure a business workflow**. Give the task a unique name and select local desktop, website, or Remote Desktop/Citrix.
 4. Enter the application/URL/remote host, input parameters, ordered business steps and a concrete success check. Save an encrypted credential profile in the form when autonomous login is required; passwords and OTPs never enter the prompt or recipe.
 5. In **Process Studio**, choose either of these setup paths:
-   - Add ordered user-defined steps. Give every click a semantic target such as `Export attendance button`; use placeholders such as `{{report_date}}` for changing values. Click **Save executable recipe**.
+   - Add ordered user-defined steps. The first step defaults to **Open application** using the application field. Give every click a semantic target such as `Export attendance button`; use placeholders such as `{{report_date}}` for changing values. Click **Save executable recipe**.
    - Put the application at a safe starting screen, optionally click **Capture current screen**, then click **Start guided recording in chat**. The agent senses the screen, performs the approved sample and records each supported operation.
-6. Click **Save workflow configuration**. Confirm the workflow appears under **Saved workflow configuration** and can be reloaded with its defined steps and reference screenshots.
+6. Click **Save workflow draft**. Confirm the workflow appears under **Saved workflow configuration** and can be reloaded with its defined steps and reference screenshots. A saved draft is not a scheduled job.
 7. Run a small sample against a test account. Directly defined recipes are saved but not executed by the Save action. Guided recording is agent-mediated; the connector does not silently monitor every mouse and keyboard action on the workstation.
 8. Replay with representative inputs and after moving the window. Re-open the resulting record/file and compare business values with the expected result.
-9. Select the required autonomous trigger: one time; daily with one or multiple time slots; weekly with selected days and time slots; every N minutes/hours/days; or an HTTP change trigger. Click **Create autonomous job** only after supervised replay passes. Enable **Autonomous Mode** for unattended safe tools. Interactive MFA, a missing profile, unexpected dialogs or required approvals stop the job safely.
+9. Select the required autonomous trigger: one time; daily with one or multiple time slots; weekly with selected days and time slots; every N minutes/hours/days; or an HTTP change trigger. Resolve every **Autonomous job readiness** message, then click **Create autonomous job** only after supervised replay passes. Confirm the green status includes the next-run time and that the task appears under **Settings → Schedule**. Enable **Autonomous Mode** for unattended safe tools. Interactive MFA, a missing profile, unexpected dialogs or required approvals stop the job safely.
 
 Platform setup:
 

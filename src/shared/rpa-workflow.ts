@@ -1,4 +1,11 @@
-export type RpaDefinedStepAction = 'click' | 'type_text' | 'key_press' | 'scroll' | 'drag' | 'wait';
+export type RpaDefinedStepAction =
+  | 'launch_app'
+  | 'click'
+  | 'type_text'
+  | 'key_press'
+  | 'scroll'
+  | 'drag'
+  | 'wait';
 
 export interface RpaDefinedStep {
   id: string;
@@ -139,7 +146,11 @@ export function normalizeRpaWorkflowBrief(brief: RpaWorkflowBrief): RpaWorkflowB
 }
 
 function normalizeDefinedStep(step: RpaDefinedStep): RpaDefinedStep {
-  if (!['click', 'type_text', 'key_press', 'scroll', 'drag', 'wait'].includes(step.action)) {
+  if (
+    !['launch_app', 'click', 'type_text', 'key_press', 'scroll', 'drag', 'wait'].includes(
+      step.action
+    )
+  ) {
     throw new Error('A user-defined process step has an unsupported action.');
   }
   const target = String(step.target || '')
@@ -151,7 +162,7 @@ function normalizeDefinedStep(step: RpaDefinedStep): RpaDefinedStep {
   if (step.action === 'click' && !target) {
     throw new Error('Every click step requires a semantic target description.');
   }
-  if (['type_text', 'key_press'].includes(step.action) && !value) {
+  if (['launch_app', 'type_text', 'key_press'].includes(step.action) && !value) {
     throw new Error(`${step.action} requires a value.`);
   }
   return {
@@ -221,4 +232,25 @@ Setup and execution requirements:
 6. Before any repeated submission, read back the application state to avoid duplicates. Do not blindly retry payments, deletions or submissions. Preserve tool permission and irreversible-action approval requirements.
 7. Report the evidence, failures and remaining manual steps. Replay on representative inputs and after a window move before recommending scheduling. For a scheduled or watch trigger, invoke the saved recipe autonomously, capture before/after screenshots, re-check the business postcondition and report a structured success/failure result. Never claim success from a click or screenshot alone.
 8. When a run encounters an unexpected dialog, ambiguous target, missing credential, locked desktop or failed postcondition, stop safely, preserve evidence and request operator attention. Do not blindly retry submissions, payments, deletions or emails.`;
+}
+
+/** Execution contract for an already reviewed workflow and saved recipe. */
+export function buildRpaAutonomousRunPrompt(brief: RpaWorkflowBrief): string {
+  const normalized = normalizeRpaWorkflowBrief(brief);
+  return `Execute the approved autonomous RPA workflow now.
+
+Workflow name and saved recipe: ${normalized.name}
+Application / URL / remote session: ${normalized.application}
+Surface: ${normalized.surface}
+Runtime inputs and parameters (no passwords): ${normalized.inputs || 'None.'}
+Credential profile reference: ${normalized.credentialProfile || 'Use the approved signed-in application session.'}
+Required business result and evidence:
+${normalized.successCheck}
+
+Execution requirements:
+1. Check GUI_Operate runtime readiness and confirm the intended desktop is available and unlocked.
+2. Find the saved recipe named exactly "${normalized.name}" and call run_recipe with the supplied runtime parameters, execution mode "${normalized.executionMode || 'ui'}", credential profile reference, and evidence capture enabled. Do not start a new recording or stop at a proposed plan.
+3. Apply all existing permission and irreversible-action approval controls. Stop on a missing recipe, credential, ambiguous target, unexpected dialog or locked desktop.
+4. Independently read back the application or output and verify this postcondition: ${normalized.successCheck}
+5. Report a structured final result containing status, start/end time, recipe name, completed step count, evidence paths, postcondition result and any operator action required. Never claim success from a click or screenshot alone.`;
 }

@@ -30,6 +30,13 @@ describe('RPA Process Studio', () => {
     expect(
       buildRecipeSteps([
         {
+          id: '0',
+          action: 'launch_app',
+          target: '',
+          value: 'Example Desktop',
+          notes: '',
+        },
+        {
           id: '1',
           action: 'click',
           target: 'Save button',
@@ -52,6 +59,10 @@ describe('RPA Process Studio', () => {
         },
       ])
     ).toEqual([
+      {
+        tool: 'launch_app',
+        args: { app_name: 'Example Desktop' },
+      },
       {
         tool: 'click',
         args: { x: 0, y: 0, intent: 'save the draft' },
@@ -120,6 +131,9 @@ describe('RPA Process Studio', () => {
     expect(() =>
       buildRecipeSteps([{ id: '1', action: 'click', target: '', value: '', notes: '' }])
     ).toThrow('semantic target');
+    expect(() =>
+      buildRecipeSteps([{ id: '1', action: 'launch_app', target: '', value: '', notes: '' }])
+    ).toThrow('launcher name');
     await expect(
       saveDefinedRecipe({
         name: 'Headless GUI',

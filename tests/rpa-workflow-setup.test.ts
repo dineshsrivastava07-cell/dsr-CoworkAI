@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildRpaAutonomousRunPrompt,
   buildRpaWorkflowPrompt,
   normalizeRpaWorkflowBrief,
   type RpaWorkflowBrief,
 } from '../src/shared/rpa-workflow';
+import { getRpaAutonomousReadinessIssues } from '../src/renderer/components/settings/RpaWorkflowSetup';
 const brief: RpaWorkflowBrief = {
   name: 'Attendance',
   surface: 'web',
@@ -42,6 +44,18 @@ describe('RPA workflow setup handoff', () => {
     expect(prompt).toContain('invoke the saved recipe autonomously');
     expect(prompt).toContain('postcondition');
     expect(prompt).not.toContain('password:');
+  });
+
+  it('uses an execution contract for scheduled runs without the recording approval gate', () => {
+    const prompt = buildRpaAutonomousRunPrompt({
+      ...brief,
+      executionMode: 'background',
+      credentialProfile: 'hrms-service-account',
+    });
+    expect(prompt).toContain('Execute the approved autonomous RPA workflow now');
+    expect(prompt).toContain('call run_recipe');
+    expect(prompt).toContain('Do not start a new recording or stop at a proposed plan');
+    expect(prompt).not.toContain('do not operate the application until I approve');
   });
 
   it('normalizes a persistable workflow configuration without credential secrets', () => {
@@ -108,5 +122,54 @@ describe('RPA workflow setup handoff', () => {
     expect(prompt).toContain('Export button');
     expect(prompt).toContain('/managed/reference.png');
     expect(prompt).toContain('08:00, 22:30');
+  });
+
+  it('blocks a past one-time job with no executable process and accepts a future defined recipe', () => {
+    const now = new Date('2026-09-15T22:33:00+05:30').getTime();
+    expect(
+      getRpaAutonomousReadinessIssues(
+        { ...brief, trigger: 'once', scheduleAt: '2026-09-15T22:28', definedSteps: [] },
+        { connected: true, configured: true, recipeNames: [], now }
+      )
+    ).toEqual([
+      'Add at least one Process Studio step or finish and save a guided recording.',
+      'Choose a future one-time run.',
+    ]);
+
+    expect(
+      getRpaAutonomousReadinessIssues(
+        {
+          ...brief,
+          trigger: 'once',
+          scheduleAt: '2026-09-15T22:40',
+          definedSteps: [
+            {
+              id: 'open',
+              action: 'launch_app',
+              target: '',
+              value: 'Example Desktop',
+              notes: '',
+            },
+          ],
+        },
+        { connected: true, configured: true, recipeNames: [], now }
+      )
+    ).toEqual([]);
+  });
+
+  it('blocks an expired interval first run before job creation', () => {
+    const now = new Date('2026-09-16T08:50:00+05:30').getTime();
+    expect(
+      getRpaAutonomousReadinessIssues(
+        {
+          ...brief,
+          trigger: 'interval',
+          scheduleAt: '2026-09-15T22:28',
+          repeatEvery: 1,
+          repeatUnit: 'hour',
+        },
+        { connected: true, configured: true, recipeNames: [brief.name], now }
+      )
+    ).toContain('Choose a future first run or leave it blank to start in five minutes.');
   });
 });

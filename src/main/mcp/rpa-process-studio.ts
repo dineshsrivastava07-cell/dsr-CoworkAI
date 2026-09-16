@@ -30,6 +30,10 @@ function buildRecipeStep(step: RpaDefinedStep, index: number): RpaStep {
   if (target.length > 2_000 || notes.length > 2_000 || value.length > 20_000) {
     throw new Error(`Step ${position}: target, value or notes are too long.`);
   }
+  if (step.action === 'launch_app') {
+    if (!value) throw new Error(`Step ${position}: open application requires a launcher name.`);
+    return { tool: 'launch_app', args: { app_name: value } };
+  }
   if (step.action === 'click') {
     if (!target) throw new Error(`Step ${position}: click requires a semantic target.`);
     return {

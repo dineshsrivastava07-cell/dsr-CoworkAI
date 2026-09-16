@@ -40,7 +40,7 @@ function getRecipesFile(): string {
 }
 
 export interface RpaStep {
-  tool: 'click' | 'type_text' | 'key_press' | 'scroll' | 'drag' | 'wait';
+  tool: 'launch_app' | 'click' | 'type_text' | 'key_press' | 'scroll' | 'drag' | 'wait';
   args: Record<string, unknown>;
   /** Semantic description of the target ("the Save button") — used to re-locate the element on replay instead of trusting stale coordinates. */
   elementDescription?: string;

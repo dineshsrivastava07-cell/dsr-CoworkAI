@@ -17,19 +17,21 @@ interface Props {
   onError: (message: string) => void;
   onStatus: (message: string) => void;
   onStartGuidedRecording: () => Promise<void>;
+  onRecipesChange: (names: string[]) => void;
 }
 
-function newStep(): RpaDefinedStep {
+function newStep(application: string, firstStep: boolean): RpaDefinedStep {
   return {
     id: globalThis.crypto?.randomUUID?.() || `step-${Date.now()}`,
-    action: 'click',
+    action: firstStep ? 'launch_app' : 'click',
     target: '',
-    value: '',
+    value: firstStep ? application : '',
     notes: '',
   };
 }
 
 function valuePlaceholder(action: RpaDefinedStepAction): string {
+  if (action === 'launch_app') return 'Application launcher name or Linux desktop ID';
   if (action === 'type_text') return 'Text or {{parameter}}';
   if (action === 'key_press') return 'enter or ctrl+s';
   if (action === 'wait') return 'Milliseconds, e.g. 1000';
@@ -46,6 +48,7 @@ export function RpaProcessStudio({
   onError,
   onStatus,
   onStartGuidedRecording,
+  onRecipesChange,
 }: Props) {
   const [recipes, setRecipes] = useState<RpaRecipePublic[]>([]);
   const [busy, setBusy] = useState(false);
@@ -55,7 +58,9 @@ export function RpaProcessStudio({
 
   async function loadRecipes() {
     try {
-      setRecipes(await window.electronAPI.rpaStudio.listRecipes());
+      const nextRecipes = await window.electronAPI.rpaStudio.listRecipes();
+      setRecipes(nextRecipes);
+      onRecipesChange(nextRecipes.map((recipe) => recipe.name));
     } catch (error) {
       onError(error instanceof Error ? error.message : 'Could not load saved RPA recipes.');
     }
@@ -180,7 +185,7 @@ export function RpaProcessStudio({
           <button
             type="button"
             disabled={busy || steps.length >= 200}
-            onClick={() => setSteps([...steps, newStep()])}
+            onClick={() => setSteps([...steps, newStep(brief.application, steps.length === 0)])}
             className="px-2 py-1 rounded bg-surface-muted text-xs text-text-primary disabled:opacity-50"
           >
             Add process step
@@ -199,10 +204,17 @@ export function RpaProcessStudio({
                   aria-label={`Step ${index + 1} action`}
                   value={step.action}
                   onChange={(event) =>
-                    updateStep(step.id, { action: event.target.value as RpaDefinedStepAction })
+                    updateStep(step.id, {
+                      action: event.target.value as RpaDefinedStepAction,
+                      value:
+                        event.target.value === 'launch_app' && !step.value
+                          ? brief.application
+                          : step.value,
+                    })
                   }
                   className={inputClass}
                 >
+                  <option value="launch_app">Open application</option>
                   <option value="click">Click target</option>
                   <option value="type_text">Type text</option>
                   <option value="key_press">Press key</option>
@@ -215,6 +227,7 @@ export function RpaProcessStudio({
                   value={step.target}
                   onChange={(event) => updateStep(step.id, { target: event.target.value })}
                   placeholder="Semantic target, e.g. Save button"
+                  disabled={step.action === 'launch_app'}
                   className={inputClass}
                 />
                 <input

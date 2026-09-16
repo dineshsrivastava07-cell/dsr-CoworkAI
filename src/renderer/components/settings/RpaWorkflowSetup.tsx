@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useIPC } from '../../hooks/useIPC';
 import { useAppStore } from '../../store';
 import {
+  buildRpaAutonomousRunPrompt,
   buildRpaWorkflowPrompt,
   type RpaWorkflowBrief,
   type SavedRpaWorkflowConfiguration,
@@ -84,6 +85,63 @@ function nextScheduleSlot(times: string[], weekdays?: number[]): number {
   throw new Error('Could not calculate the next scheduled run.');
 }
 
+export function getRpaAutonomousReadinessIssues(
+  brief: RpaWorkflowBrief,
+  options: {
+    connected: boolean;
+    configured: boolean;
+    recipeNames: string[];
+    now?: number;
+  }
+): string[] {
+  const issues: string[] = [];
+  const now = options.now ?? Date.now();
+  if (!options.connected) issues.push('Enable and connect RPA.');
+  if (!options.configured) issues.push('Configure an AI provider and model.');
+  if (
+    ![brief.name, brief.application, brief.steps, brief.successCheck].every((value) => value.trim())
+  ) {
+    issues.push('Complete the workflow name, application, business steps and success check.');
+  }
+  if (brief.executionMode === 'headless') {
+    issues.push('Desktop recipes require UI or Background execution mode.');
+  }
+  const recipeExists = options.recipeNames.some(
+    (name) => name.toLowerCase() === brief.name.trim().toLowerCase()
+  );
+  if (!recipeExists && (brief.definedSteps?.length || 0) === 0) {
+    issues.push('Add at least one Process Studio step or finish and save a guided recording.');
+  }
+  if (!brief.trigger || brief.trigger === 'manual') {
+    issues.push('Choose an autonomous trigger.');
+  } else if (brief.trigger === 'once') {
+    const runAt = brief.scheduleAt ? new Date(brief.scheduleAt).getTime() : NaN;
+    if (!Number.isFinite(runAt) || runAt <= now) issues.push('Choose a future one-time run.');
+  } else if (brief.trigger === 'daily' && (brief.scheduleTimes?.length || 0) === 0) {
+    issues.push('Add at least one daily time slot.');
+  } else if (brief.trigger === 'weekly') {
+    if ((brief.scheduleWeekdays?.length || 0) === 0) issues.push('Select at least one weekday.');
+    if ((brief.scheduleTimes?.length || 0) === 0) issues.push('Add at least one weekly time slot.');
+  } else if (brief.trigger === 'interval') {
+    const firstRun = brief.scheduleAt ? new Date(brief.scheduleAt).getTime() : null;
+    if (firstRun !== null && (!Number.isFinite(firstRun) || firstRun <= now)) {
+      issues.push('Choose a future first run or leave it blank to start in five minutes.');
+    }
+    if (!Number.isFinite(brief.repeatEvery) || (brief.repeatEvery || 0) < 1) {
+      issues.push('Repeat interval must be at least 1.');
+    }
+  } else if (brief.trigger === 'watch' && !brief.watchUrl?.trim()) {
+    issues.push('Enter the HTTP trigger URL.');
+  }
+  return issues;
+}
+
+function toLocalDateTimeMinimum(timestamp: number): string {
+  const date = new Date(timestamp);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(timestamp - offset).toISOString().slice(0, 16);
+}
+
 export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
   const { startSession } = useIPC();
   const configured = useAppStore((state) => state.isConfigured);
@@ -99,6 +157,15 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
   const [credentialUsername, setCredentialUsername] = useState('');
   const [credentialPassword, setCredentialPassword] = useState('');
   const [scheduleTime, setScheduleTime] = useState('08:00');
+  const [recipeNames, setRecipeNames] = useState<string[]>([]);
+  const [clockNow, setClockNow] = useState(Date.now());
+
+  const readinessIssues = getRpaAutonomousReadinessIssues(brief, {
+    connected,
+    configured,
+    recipeNames,
+    now: clockNow,
+  });
 
   useEffect(() => {
     let active = true;
@@ -115,6 +182,11 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setClockNow(Date.now()), 15_000);
+    return () => window.clearInterval(interval);
   }, []);
 
   function change(key: keyof RpaWorkflowBrief, value: RpaWorkflowBrief[keyof RpaWorkflowBrief]) {
@@ -157,7 +229,9 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
       ]);
       setBrief(savedWorkflowToBrief(saved));
       setSelectedWorkflow(saved.name);
-      setStatus(`Workflow configuration “${saved.name}” saved.`);
+      setStatus(
+        `Workflow draft “${saved.name}” saved. No autonomous job was created; use Create autonomous job after readiness is clear.`
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save workflow configuration.');
     } finally {
@@ -235,22 +309,31 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
     }
   }
   async function scheduleAutonomousRun() {
-    const prompt = prepare();
-    if (!prompt) return;
+    const currentIssues = getRpaAutonomousReadinessIssues(brief, {
+      connected,
+      configured,
+      recipeNames,
+    });
+    if (currentIssues.length > 0) {
+      setError(currentIssues.join(' '));
+      return;
+    }
+    const reviewPrompt = prepare();
+    if (!reviewPrompt) return;
+    const prompt = buildRpaAutonomousRunPrompt(brief);
     if (brief.trigger === 'manual') {
       setError('Choose a scheduled or watch trigger before creating an autonomous job.');
       return;
     }
     const now = Date.now();
     let payload: ScheduleCreateInput;
-    const runInstruction = `AUTONOMOUS RUN: Find the saved recipe named "${brief.name.trim()}" and call run_recipe with the supplied parameters. Capture evidence and verify the stated business postcondition before reporting success.`;
     if (brief.trigger === 'watch') {
       if (!brief.watchUrl?.trim()) {
         setError('Enter a trigger URL for a watch job.');
         return;
       }
       payload = {
-        prompt: `${prompt}\n\n${runInstruction}`,
+        prompt,
         cwd: workingDir || '',
         runAt: now + 5 * 60 * 1000,
         nextRunAt: now + 5 * 60 * 1000,
@@ -268,7 +351,7 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
         return;
       }
       payload = {
-        prompt: `${prompt}\n\n${runInstruction}`,
+        prompt,
         cwd: workingDir || '',
         runAt,
         nextRunAt: runAt,
@@ -287,7 +370,7 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
       }
       const runAt = nextScheduleSlot(times, brief.trigger === 'weekly' ? weekdays : undefined);
       payload = {
-        prompt: `${prompt}\n\n${runInstruction}`,
+        prompt,
         cwd: workingDir || '',
         runAt,
         nextRunAt: runAt,
@@ -310,7 +393,7 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
         return;
       }
       payload = {
-        prompt: `${prompt}\n\n${runInstruction}`,
+        prompt,
         cwd: workingDir || '',
         runAt: firstRun,
         nextRunAt: firstRun,
@@ -322,8 +405,28 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
     setBusy(true);
     setError('');
     try {
-      const recipes = await window.electronAPI.rpaStudio.listRecipes();
-      if (!recipes.some((recipe) => recipe.name === brief.name.trim())) {
+      let recipes = await window.electronAPI.rpaStudio.listRecipes();
+      let recipeExists = recipes.some(
+        (recipe) => recipe.name.toLowerCase() === brief.name.trim().toLowerCase()
+      );
+      if (!recipeExists && (brief.definedSteps?.length || 0) > 0) {
+        const savedRecipe = await window.electronAPI.rpaStudio.saveRecipe({
+          name: brief.name,
+          appName: brief.application,
+          description: brief.steps,
+          steps: brief.definedSteps || [],
+          executionMode: brief.executionMode,
+          credentialProfile: brief.credentialProfile,
+          successCheck: brief.successCheck,
+        });
+        if (!savedRecipe.success || !savedRecipe.recipe) {
+          throw new Error(savedRecipe.error || 'Could not save the executable recipe.');
+        }
+        recipes = await window.electronAPI.rpaStudio.listRecipes();
+        setRecipeNames(recipes.map((recipe) => recipe.name));
+        recipeExists = true;
+      }
+      if (!recipeExists) {
         throw new Error(
           `No executable recipe named “${brief.name.trim()}”. Save defined steps or complete guided recording before scheduling.`
         );
@@ -338,9 +441,10 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
         ...current.filter((saved) => saved.name.toLowerCase() !== workflow.name.toLowerCase()),
       ]);
       setSelectedWorkflow(workflow.name);
-      await window.electronAPI.schedule.create(payload);
-      setDraft(`${prompt}\n\nAutonomous job created for recipe "${brief.name.trim()}".`);
-      setStatus('Autonomous job created.');
+      const task = await window.electronAPI.schedule.create(payload);
+      const nextRun = task.nextRunAt ?? task.runAt;
+      setDraft(`${prompt}\n\nAutonomous job ${task.id} created for recipe "${brief.name.trim()}".`);
+      setStatus(`Autonomous job created. Next run: ${new Date(nextRun).toLocaleString()}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create autonomous job.');
     } finally {
@@ -511,6 +615,7 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
             onError={setError}
             onStatus={setStatus}
             onStartGuidedRecording={reviewInChat}
+            onRecipesChange={setRecipeNames}
           />
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-xs text-text-secondary">
@@ -589,6 +694,7 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
               {brief.trigger === 'once' ? 'Run at' : 'First run'}
               <input
                 type="datetime-local"
+                min={toLocalDateTimeMinimum(clockNow + 60_000)}
                 className={inputClass}
                 value={brief.scheduleAt || ''}
                 onChange={(e) => change('scheduleAt', e.target.value)}
@@ -718,6 +824,25 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
               />
             </label>
           )}
+          {brief.trigger !== 'manual' && (
+            <div className="rounded border border-border bg-background p-3 space-y-1">
+              <div className="text-xs font-medium text-text-secondary">
+                Autonomous job readiness
+              </div>
+              {readinessIssues.length === 0 ? (
+                <p className="text-xs text-success">
+                  Ready. Creating the job will save defined steps as a recipe and register the
+                  schedule.
+                </p>
+              ) : (
+                readinessIssues.map((issue) => (
+                  <p key={issue} className="text-xs text-error">
+                    • {issue}
+                  </p>
+                ))
+              )}
+            </div>
+          )}
           <div className="flex gap-2 flex-wrap">
             <button
               type="button"
@@ -725,7 +850,7 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
               onClick={() => void saveWorkflowConfiguration()}
               className="px-3 py-2 rounded bg-accent text-white text-sm disabled:opacity-50"
             >
-              {busy ? 'Saving…' : 'Save workflow configuration'}
+              {busy ? 'Saving…' : 'Save workflow draft'}
             </button>
             <button
               type="button"
@@ -736,7 +861,7 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
             </button>
             <button
               type="button"
-              disabled={!connected || !configured || busy || brief.trigger === 'manual'}
+              disabled={busy || readinessIssues.length > 0}
               onClick={() => void scheduleAutonomousRun()}
               className="px-3 py-2 rounded bg-accent/80 text-white text-sm disabled:opacity-50"
             >

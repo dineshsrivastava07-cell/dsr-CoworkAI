@@ -43,6 +43,7 @@ import {
   type RpaExecutionMode,
 } from './rpa-recipe-store';
 import { fillCredentialParams, redactCredentialSecrets } from './rpa-credential-runtime';
+import { launchDesktopApplication } from './desktop-app-launcher';
 import {
   getLinuxRuntimeStatus,
   linuxGetDisplayConfiguration,
@@ -6784,6 +6785,21 @@ function createMcpServer(): Server {
           },
         },
         {
+          name: 'launch_app',
+          description:
+            'Open an installed desktop application by its launcher name. On Linux, provide the application desktop ID accepted by gtk-launch. This does not bypass OS login, permissions, lock-screen, or application authentication.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              app_name: {
+                type: 'string',
+                description: 'Installed application launcher name, or Linux desktop ID.',
+              },
+            },
+            required: ['app_name'],
+          },
+        },
+        {
           name: 'clear_click_history',
           description:
             'Clear the click history for the current application. This removes all click markers from screenshots and deletes the persistent storage for this app. Use this when starting a completely new task or when you want to reset all visual markers.',
@@ -6847,13 +6863,13 @@ function createMcpServer(): Server {
         {
           name: 'record_recipe_step',
           description:
-            'Append the action you just performed to the in-progress recipe recording. Call this immediately after each click/type_text/key_press/scroll/drag/wait during recording, restating the exact tool and arguments you used, plus a short semantic description of the target element (e.g. "the Save button") — this description is what makes replay reliable even if the window later moves or resizes.',
+            'Append the action you just performed to the in-progress recipe recording. Call this immediately after each launch_app/click/type_text/key_press/scroll/drag/wait during recording, restating the exact tool and arguments you used, plus a short semantic description of the target element (e.g. "the Save button") — this description is what makes replay reliable even if the window later moves or resizes.',
           inputSchema: {
             type: 'object',
             properties: {
               tool: {
                 type: 'string',
-                enum: ['click', 'type_text', 'key_press', 'scroll', 'drag', 'wait'],
+                enum: ['launch_app', 'click', 'type_text', 'key_press', 'scroll', 'drag', 'wait'],
               },
               args: {
                 type: 'object',
@@ -6953,6 +6969,33 @@ function createMcpServer(): Server {
       let resultImage: { data: string; mimeType: string } | undefined;
 
       switch (name) {
+        case 'launch_app': {
+          if (emergencyStopActive) {
+            throw new Error(
+              'GUI automation is emergency-stopped. Call resume_automation before issuing further actions.'
+            );
+          }
+          const { app_name } = args as { app_name: string };
+          const normalizedAppName = app_name?.trim();
+          if (!normalizedAppName) throw new Error('app_name is required');
+          const denylistMatch = getGuiDenylistApps().find((term) =>
+            normalizedAppName.toLowerCase().includes(term)
+          );
+          if (denylistMatch) {
+            throw new Error(
+              `Refusing to open an application matching the GUI denylist ("${denylistMatch}").`
+            );
+          }
+          await launchDesktopApplication(normalizedAppName, PLATFORM);
+          const initResult = await initApp(normalizedAppName);
+          result = JSON.stringify({
+            success: true,
+            message: `Opened application "${normalizedAppName}" and initialized its RPA context.`,
+            app_name: initResult.appName,
+          });
+          break;
+        }
+
         case 'get_runtime_status': {
           result = JSON.stringify(await getDesktopRuntimeStatus(), null, 2);
           break;
