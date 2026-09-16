@@ -59,8 +59,12 @@ function winrmHelp(target: Endpoint) {
               : `Configured for ${target.winrmAuth === 'ntlm' ? 'NTLM' : target.winrmAuth === 'basic' ? 'Basic' : 'automatic local Basic/domain NTLM selection'} over ${usesHttps ? 'HTTPS' : 'HTTP'}. This describes the adapter configuration; it is not evidence that the target listener or authentication succeeded. HTTPS certificate verification is ${target.winrmRejectUnauthorized === false ? 'disabled by explicit configuration' : 'enabled'}.`,
         localChecks: [
           'Get-Service WinRM',
-          `Get-NetTCPConnection -State Listen -LocalPort ${Array.from(new Set([portFor(target), 5985, 5986])).join(',')} -ErrorAction SilentlyContinue`,
+          'Get-Service sshd -ErrorAction SilentlyContinue',
+          `Get-NetTCPConnection -State Listen -LocalPort ${Array.from(new Set([22, portFor(target), 5985, 5986])).join(',')} -ErrorAction SilentlyContinue`,
+          `Get-NetTCPConnection -State Listen -LocalPort ${portFor(target)} -ErrorAction SilentlyContinue`,
           'winrm enumerate winrm/config/listener',
+          "Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH*'",
+          'Get-NetFirewallRule -Name OpenSSH-Server-In-TCP -ErrorAction SilentlyContinue | Select-Object Name,Enabled,Profile,Action',
           ...(usesHttps
             ? [
                 "Get-ChildItem Cert:\\LocalMachine\\My | Where-Object { $_.HasPrivateKey -and $_.EnhancedKeyUsageList.ObjectId -contains '1.3.6.1.5.5.7.3.1' } | Select-Object Subject,DnsNameList,Thumbprint,NotAfter",
@@ -234,6 +238,12 @@ function winrmRemediationCommands(target: Endpoint): string[] {
     'Set-Service WinRM -StartupType Automatic',
     'Start-Service WinRM',
     'Enable-PSRemoting -Force',
+    "Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH*'",
+    'Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0',
+    'Start-Service sshd',
+    'Set-Service -Name sshd -StartupType Automatic',
+    "if (!(Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 } else { Enable-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' }",
+    'Test-NetConnection -ComputerName localhost -Port 22',
   ];
   if (usesHttps) {
     commands.push(

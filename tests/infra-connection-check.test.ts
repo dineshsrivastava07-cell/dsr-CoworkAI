@@ -89,6 +89,7 @@ describe('Infra RCA connection diagnostics', () => {
     expect(result.localChecks?.join('\n')).toContain('-LocalPort 5986');
     expect(result.limitation).toContain('over HTTPS');
     expect(result.localChecks?.join('\n')).toContain('Cert:\\LocalMachine\\My');
+    expect(result.localChecks).toContain('Get-Service sshd -ErrorAction SilentlyContinue');
   });
 
   it('connects to a real TCP listener and detects refusal after that listener closes', async () => {
@@ -179,6 +180,9 @@ describe('Infra RCA connection diagnostics', () => {
       ])
     );
     expect(result.remediationCommands).toContain('Enable-PSRemoting -Force');
+    expect(result.remediationCommands).toContain(
+      'Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0'
+    );
     expect(result.remediationCommands?.join('\n')).toContain('winrm quickconfig -transport:https');
   });
 
