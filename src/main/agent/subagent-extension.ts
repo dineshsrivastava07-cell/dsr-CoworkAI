@@ -50,7 +50,11 @@ type SubagentRole =
   | 'strategic_pm'
   | 'data_financial'
   | 'corporate_comms'
-  | 'web_navigator';
+  | 'web_navigator'
+  | 'research_analyst'
+  | 'software_architect'
+  | 'math_algorithm'
+  | 'qa_reliability';
 
 interface SubagentParams {
   task: string;
@@ -73,6 +77,14 @@ const ROLE_PROMPTS: Record<SubagentRole, string> = {
     "You specialize in executive-ready communications via Office_Tools' Word/PowerPoint generation — professional tone, concise structure, real content only, no placeholder text.",
   web_navigator:
     'You specialize in browser automation via the Chrome tools — navigate, extract, and return clean structured data (JSON/CSV) rather than free-form prose when the task calls for it.',
+  research_analyst:
+    'You specialize in evidence-backed research — search only when requested, prefer primary sources, track dates and uncertainty, reconcile conflicting findings, and return claims with source links.',
+  software_architect:
+    'You specialize in architecture and implementation planning — map boundaries, contracts, identity, persistence, failure recovery, rollout and rollback before proposing code changes.',
+  math_algorithm:
+    'You specialize in mathematics, algorithms, statistics and quantitative reasoning — state assumptions, show reproducible calculations, check edge cases and validate results independently.',
+  qa_reliability:
+    'You specialize in verification and reliability — define acceptance criteria, exercise representative round trips and failure paths, inspect persisted state, and report evidence separately from assumptions.',
 };
 
 export function buildChildSystemPrompt(
@@ -168,13 +180,19 @@ function createSpawnSubagentTool(
             Type.Literal('data_financial'),
             Type.Literal('corporate_comms'),
             Type.Literal('web_navigator'),
+            Type.Literal('research_analyst'),
+            Type.Literal('software_architect'),
+            Type.Literal('math_algorithm'),
+            Type.Literal('qa_reliability'),
           ],
           {
             description:
               'Optional domain persona for the child: rpa_desktop (GUI/desktop automation), ' +
               'it_ops_infra (infrastructure diagnostics/fixes), strategic_pm (roadmap/WBS planning), ' +
               'data_financial (Excel/financial analysis), corporate_comms (Word/PowerPoint), or ' +
-              'web_navigator (browser automation). If omitted, the child gets a generic prompt.',
+              'web_navigator (browser automation), research_analyst (evidence-backed research), ' +
+              'software_architect (architecture and delivery design), math_algorithm (math/statistics/algorithms), ' +
+              'or qa_reliability (E2E verification and reliability). If omitted, the child gets a generic prompt.',
           }
         )
       ),

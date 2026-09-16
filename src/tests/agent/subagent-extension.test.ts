@@ -28,6 +28,21 @@ const mockContext = {
 };
 
 describe('SubagentExtension', () => {
+  it('exposes specialist prompts for broad expert task routing', () => {
+    expect(buildChildSystemPrompt('prove the algorithm', undefined, 'math_algorithm')).toContain(
+      'mathematics, algorithms, statistics'
+    );
+    expect(buildChildSystemPrompt('validate the release', undefined, 'qa_reliability')).toContain(
+      'acceptance criteria'
+    );
+    expect(
+      buildChildSystemPrompt('research the standard', undefined, 'research_analyst')
+    ).toContain('primary sources');
+    expect(buildChildSystemPrompt('design the system', undefined, 'software_architect')).toContain(
+      'contracts'
+    );
+  });
+
   it('registers spawn_subagent tool via beforeSessionRun', async () => {
     const extension = new SubagentExtension(() => null, noopSend, noopPermission, noopSignal);
     const result = await extension.beforeSessionRun(mockContext as never);
