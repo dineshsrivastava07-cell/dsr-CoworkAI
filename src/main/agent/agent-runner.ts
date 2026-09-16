@@ -436,6 +436,17 @@ function buildMcpCustomTools(mcpManager: MCPManager): ToolDefinition[] {
   });
 }
 
+function fingerprintMcpTools(mcpManager: MCPManager): string {
+  return mcpManager
+    .getTools()
+    .map(
+      (tool) =>
+        `${tool.name}\u0000${tool.serverName}\u0000${tool.originalName || ''}\u0000${JSON.stringify(tool.inputSchema)}`
+    )
+    .sort()
+    .join('\u0001');
+}
+
 /**
  * Get shell environment with proper PATH (including node, npm, etc.)
  * GUI apps on macOS don't inherit shell PATH, so we need to extract it
@@ -586,6 +597,7 @@ export class CoworkAgentRunner {
 
   // Per-instance caches — invalidated when the underlying config changes.
   private _mcpServersCache: { fingerprint: string; servers: Record<string, unknown> } | null = null;
+  private _mcpToolsCache: { fingerprint: string; tools: ToolDefinition[] } | null = null;
   private _skillsSetupDone = false;
 
   /**
@@ -954,6 +966,7 @@ export class CoworkAgentRunner {
   /** Call after the user changes MCP server config so the next query rebuilds mcpServers. */
   invalidateMcpServersCache(): void {
     this._mcpServersCache = null;
+    this._mcpToolsCache = null;
     // AgentSession snapshots its custom-tool registry at creation. Dispose
     // cached sessions so removed/changed MCP tools cannot remain callable.
     this.clearAllSdkSessions();
@@ -2623,7 +2636,16 @@ WEB SEARCH: Only use WebSearch/WebFetch when user explicitly asks to search the 
       const shouldExposeBrowserTools =
         this.isExplicitBrowserIntent(prompt) && !this.isLocalArtifactIntent(prompt);
       const mcpCustomTools = this.mcpManager
-        ? buildMcpCustomTools(this.mcpManager).filter((tool) => {
+        ? (() => {
+            const fingerprint = fingerprintMcpTools(this.mcpManager!);
+            if (!this._mcpToolsCache || this._mcpToolsCache.fingerprint !== fingerprint) {
+              this._mcpToolsCache = {
+                fingerprint,
+                tools: buildMcpCustomTools(this.mcpManager!),
+              };
+            }
+            return this._mcpToolsCache.tools;
+          })().filter((tool) => {
             if (shouldExposeBrowserTools) return true;
             return !tool.name.toLowerCase().startsWith('mcp__chrome__');
           })
