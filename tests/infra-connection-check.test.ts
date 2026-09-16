@@ -180,7 +180,7 @@ describe('Infra RCA connection diagnostics', () => {
       ])
     );
     expect(result.remediationCommands).toContain('Enable-PSRemoting -Force');
-    expect(result.remediationCommands).toContain(
+    expect(result.remediationCommands?.join('\n')).toContain(
       'Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0'
     );
     expect(result.remediationCommands?.join('\n')).toContain('winrm quickconfig -transport:https');

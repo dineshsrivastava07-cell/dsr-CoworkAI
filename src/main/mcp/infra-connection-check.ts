@@ -239,7 +239,7 @@ function winrmRemediationCommands(target: Endpoint): string[] {
     'Start-Service WinRM',
     'Enable-PSRemoting -Force',
     "Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH*'",
-    'Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0',
+    "if ((Get-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0).State -ne 'Installed') { Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 }",
     'Start-Service sshd',
     'Set-Service -Name sshd -StartupType Automatic',
     "if (!(Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 } else { Enable-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' }",

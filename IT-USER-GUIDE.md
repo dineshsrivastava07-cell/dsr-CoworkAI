@@ -403,6 +403,8 @@ On macOS, Microsoft RDP is not built into the operating system. Install Microsof
 
 For a Windows target that also needs SSH, the **Administrator repair** block includes an idempotent OpenSSH Server bootstrap: it installs the Windows capability, starts `sshd`, sets automatic startup, creates or enables the scoped TCP 22 firewall rule, and tests localhost port 22. If the machine cannot reach Windows Update, deploy the OpenSSH capability through the organization’s endpoint-management or WSUS process first. Microsoft’s supported procedure is in the [OpenSSH Server configuration guide](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse).
 
+For repeatable or fleet deployment, use [`resources/windows/Infra-RCA-Windows-Bootstrap.ps1`](resources/windows/Infra-RCA-Windows-Bootstrap.ps1) through RDP, Group Policy, Intune, Configuration Manager or another approved endpoint-management channel. Run it without `-ConfigureHttps` for NTLM/HTTP, or with `-ConfigureHttps` after installing an approved Server Authentication certificate. The script is administrator-guarded, supports `-WhatIf`, scopes new firewall rules to Domain/Private profiles and verifies SSH plus WinRM after configuration.
+
 Microsoft documents listener inspection and the default HTTP/HTTPS ports in its [WinRM installation and configuration reference](https://learn.microsoft.com/en-us/windows/win32/winrm/installation-and-configuration-for-windows-remote-management). Follow the organization's approved deployment policy for changes; these diagnostic commands do not change a remote system.
 
 ### Advanced/expert Infra RCA assessment
