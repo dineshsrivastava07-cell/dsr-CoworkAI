@@ -48,12 +48,15 @@ function portFor(target: Endpoint): number {
 }
 
 function winrmHelp(target: Endpoint) {
+  const usesHttps = target.winrmTransport === 'https' || target.port === 5986;
   return target.protocol === 'winrm'
     ? {
         limitation:
-          target.winrmAuth === 'kerberos'
-            ? 'WinRM Kerberos uses the current Windows domain ticket and requires a Windows V-Coworker host. It never falls back to password authentication.'
-            : `Configured for ${target.winrmAuth === 'ntlm' ? 'NTLM' : target.winrmAuth === 'basic' ? 'Basic' : 'automatic local Basic/domain NTLM selection'} over ${target.winrmTransport === 'https' || target.port === 5986 ? 'HTTPS' : 'HTTP'}. This describes the adapter configuration; it is not evidence that the target listener or authentication succeeded. HTTPS certificate verification is ${target.winrmRejectUnauthorized === false ? 'disabled by explicit configuration' : 'enabled'}.`,
+          target.winrmAuth === 'basic' && !usesHttps
+            ? 'Basic over HTTP is configured but blocked by organizational safety policy. Edit this target to use Basic over HTTPS, or use approved NTLM/Kerberos.'
+            : target.winrmAuth === 'kerberos'
+              ? 'WinRM Kerberos uses the current Windows domain ticket and requires a Windows V-Coworker host. It never falls back to password authentication.'
+              : `Configured for ${target.winrmAuth === 'ntlm' ? 'NTLM' : target.winrmAuth === 'basic' ? 'Basic' : 'automatic local Basic/domain NTLM selection'} over ${usesHttps ? 'HTTPS' : 'HTTP'}. This describes the adapter configuration; it is not evidence that the target listener or authentication succeeded. HTTPS certificate verification is ${target.winrmRejectUnauthorized === false ? 'disabled by explicit configuration' : 'enabled'}.`,
         localChecks: [
           'Get-Service WinRM',
           `Get-NetTCPConnection -State Listen -LocalPort ${Array.from(new Set([portFor(target), 5985, 5986])).join(',')} -ErrorAction SilentlyContinue`,
