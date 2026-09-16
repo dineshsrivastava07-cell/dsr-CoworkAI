@@ -88,6 +88,7 @@ describe('Infra RCA connection diagnostics', () => {
     expect(result.port).toBe(5986);
     expect(result.localChecks?.join('\n')).toContain('-LocalPort 5986');
     expect(result.limitation).toContain('over HTTPS');
+    expect(result.localChecks?.join('\n')).toContain('Cert:\\LocalMachine\\My');
   });
 
   it('connects to a real TCP listener and detects refusal after that listener closes', async () => {
@@ -149,7 +150,7 @@ describe('Infra RCA connection diagnostics', () => {
   });
 
   it('distinguishes a reachable Windows host from a missing WinRM listener', async () => {
-    const result = await checkInfraConnection(target, 250, {
+    const result = await checkInfraConnection({ ...target, winrmTransport: 'https' }, 250, {
       advancedWinrm: true,
       inspectNetworkPath: async () => ({
         interface: 'en0',
@@ -178,6 +179,7 @@ describe('Infra RCA connection diagnostics', () => {
       ])
     );
     expect(result.remediationCommands).toContain('Enable-PSRemoting -Force');
+    expect(result.remediationCommands?.join('\n')).toContain('winrm quickconfig -transport:https');
   });
 
   it('times out a stalled socket and destroys it without leaving a timer', async () => {

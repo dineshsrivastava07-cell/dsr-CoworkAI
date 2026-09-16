@@ -1,4 +1,5 @@
-import { AlertCircle, CheckCircle } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle, Copy } from 'lucide-react';
+import { useState } from 'react';
 import type { InfraRcaConnectionResult, InfraRcaProtocol } from '../../../shared/ipc-types';
 
 export function InfraConnectionResult({
@@ -8,6 +9,14 @@ export function InfraConnectionResult({
   result: InfraRcaConnectionResult;
   protocol: InfraRcaProtocol;
 }) {
+  const [copied, setCopied] = useState(false);
+  const repairText = result.remediationCommands?.join('\n') || '';
+  const copyRepair = async () => {
+    if (!repairText) return;
+    await navigator.clipboard.writeText(repairText);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  };
   return (
     <div className="text-xs mt-1 space-y-2" role="status">
       <div className={`flex items-start gap-1 ${result.reachable ? 'text-success' : 'text-error'}`}>
@@ -77,6 +86,15 @@ export function InfraConnectionResult({
           <pre className="whitespace-pre-wrap break-words p-2 rounded bg-surface-muted select-text">
             {result.remediationCommands.join('\n')}
           </pre>
+          <button
+            type="button"
+            onClick={() => void copyRepair()}
+            className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 mt-2 text-text-primary hover:bg-surface"
+            aria-label="Copy administrator repair commands"
+          >
+            {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+            {copied ? 'Copied' : 'Copy repair commands'}
+          </button>
         </details>
       )}
     </div>

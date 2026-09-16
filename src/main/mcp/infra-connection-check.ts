@@ -61,6 +61,12 @@ function winrmHelp(target: Endpoint) {
           'Get-Service WinRM',
           `Get-NetTCPConnection -State Listen -LocalPort ${Array.from(new Set([portFor(target), 5985, 5986])).join(',')} -ErrorAction SilentlyContinue`,
           'winrm enumerate winrm/config/listener',
+          ...(usesHttps
+            ? [
+                "Get-ChildItem Cert:\\LocalMachine\\My | Where-Object { $_.HasPrivateKey -and $_.EnhancedKeyUsageList.ObjectId -contains '1.3.6.1.5.5.7.3.1' } | Select-Object Subject,DnsNameList,Thumbprint,NotAfter",
+                'Get-NetFirewallPortFilter | Where-Object LocalPort -in 5985,5986 | Select-Object InstanceID,LocalPort',
+              ]
+            : []),
           "Get-NetFirewallRule -DisplayGroup 'Windows Remote Management' | Select-Object DisplayName,Enabled,Direction,Action,Profile",
           'Test-WSMan -ComputerName localhost',
         ],
@@ -221,14 +227,32 @@ function classifyWinrmLoginFailure(
   };
 }
 
-const winrmRemediationCommands = [
-  'Get-NetConnectionProfile',
-  'Set-Service WinRM -StartupType Automatic',
-  'Start-Service WinRM',
-  'Enable-PSRemoting -Force',
-  "Get-NetFirewallRule -DisplayGroup 'Windows Remote Management' | Select-Object DisplayName,Enabled,Direction,Action,Profile",
-  'Test-WSMan -ComputerName localhost',
-];
+function winrmRemediationCommands(target: Endpoint): string[] {
+  const usesHttps = target.winrmTransport === 'https' || target.port === 5986;
+  const commands = [
+    'Get-NetConnectionProfile',
+    'Set-Service WinRM -StartupType Automatic',
+    'Start-Service WinRM',
+    'Enable-PSRemoting -Force',
+  ];
+  if (usesHttps) {
+    commands.push(
+      '# HTTPS requires an approved, non-expired LocalMachine\\My certificate with Server Authentication and a hostname/SAN matching this target.',
+      "Get-ChildItem Cert:\\LocalMachine\\My | Where-Object { $_.HasPrivateKey -and $_.EnhancedKeyUsageList.ObjectId -contains '1.3.6.1.5.5.7.3.1' } | Select-Object Subject,DnsNameList,Thumbprint,NotAfter",
+      'winrm quickconfig -transport:https -quiet',
+      "Get-NetFirewallRule -DisplayGroup 'Windows Remote Management' | Enable-NetFirewallRule",
+      'winrm enumerate winrm/config/listener',
+      'Test-WSMan -ComputerName localhost -UseSSL'
+    );
+  } else {
+    commands.push(
+      "Get-NetFirewallRule -DisplayGroup 'Windows Remote Management' | Enable-NetFirewallRule",
+      'winrm enumerate winrm/config/listener',
+      'Test-WSMan -ComputerName localhost'
+    );
+  }
+  return commands;
+}
 
 async function checkWinrmAdvanced(
   target: TargetCredentials,
@@ -335,7 +359,7 @@ async function checkWinrmAdvanced(
       ],
       probes,
       networkPath,
-      remediationCommands: winrmRemediationCommands,
+      remediationCommands: winrmRemediationCommands(target),
       ...winrmHelp(target),
     };
   }
