@@ -237,19 +237,22 @@ Setup and execution requirements:
 /** Execution contract for an already reviewed workflow and saved recipe. */
 export function buildRpaAutonomousRunPrompt(brief: RpaWorkflowBrief): string {
   const normalized = normalizeRpaWorkflowBrief(brief);
+  const credentialInstruction = normalized.credentialProfile
+    ? `pass credential_profile exactly as "${normalized.credentialProfile}"`
+    : 'omit credential_profile so the recipe uses the current approved signed-in application session';
   return `Execute the approved autonomous RPA workflow now.
 
 Workflow name and saved recipe: ${normalized.name}
 Application / URL / remote session: ${normalized.application}
 Surface: ${normalized.surface}
 Runtime inputs and parameters (no passwords): ${normalized.inputs || 'None.'}
-Credential profile reference: ${normalized.credentialProfile || 'Use the approved signed-in application session.'}
+Credential profile reference: ${normalized.credentialProfile || 'None; use the current approved signed-in application session.'}
 Required business result and evidence:
 ${normalized.successCheck}
 
 Execution requirements:
 1. Check GUI_Operate runtime readiness and confirm the intended desktop is available and unlocked.
-2. Find the saved recipe named exactly "${normalized.name}" and call run_recipe with the supplied runtime parameters, execution mode "${normalized.executionMode || 'ui'}", credential profile reference, and evidence capture enabled. Do not start a new recording or stop at a proposed plan.
+2. Find the saved recipe named exactly "${normalized.name}" and call run_recipe with the supplied runtime parameters, execution mode "${normalized.executionMode || 'ui'}", evidence capture enabled, and ${credentialInstruction}. Do not invent a credential profile. Do not start a new recording or stop at a proposed plan.
 3. Apply all existing permission and irreversible-action approval controls. Stop on a missing recipe, credential, ambiguous target, unexpected dialog or locked desktop.
 4. Independently read back the application or output and verify this postcondition: ${normalized.successCheck}
 5. Report a structured final result containing status, start/end time, recipe name, completed step count, evidence paths, postcondition result and any operator action required. Never claim success from a click or screenshot alone.`;

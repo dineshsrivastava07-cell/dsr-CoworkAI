@@ -44,6 +44,8 @@ import {
 } from './rpa-recipe-store';
 import { fillCredentialParams, redactCredentialSecrets } from './rpa-credential-runtime';
 import { launchDesktopApplication } from './desktop-app-launcher';
+import { buildOpenAIVisionTokenLimit } from './vision-request-compat';
+import { canReuseScreenshot, type ScreenshotPurpose } from './screenshot-freshness-policy';
 import {
   getLinuxRuntimeStatus,
   linuxGetDisplayConfiguration,
@@ -4671,7 +4673,7 @@ async function callVisionAPIWithTimeout(
           ],
         },
       ],
-      max_tokens: maxTokens,
+      ...buildOpenAIVisionTokenLimit(maxTokens, compatibilityMode, previousErrorMessage),
     };
 
     const requestBody = JSON.stringify(requestBodyObj);
@@ -6111,7 +6113,7 @@ async function verifyGUIState(question: string, displayIndex?: number): Promise<
 
   const normalizedDisplayIndex = displayIndex ?? 0;
   const regionKey = toRegionKey(undefined);
-  const reusable = getReusableScreenshot(normalizedDisplayIndex, regionKey);
+  const reusable = getReusableScreenshot(normalizedDisplayIndex, regionKey, 'verification');
 
   let screenshotPath: string;
   let base64Image: string;
@@ -6267,7 +6269,8 @@ function toRegionKey(region?: { x: number; y: number; width: number; height: num
 
 function getReusableScreenshot(
   displayIndex: number,
-  regionKey: string
+  regionKey: string,
+  purpose: ScreenshotPurpose = 'display'
 ): ScreenshotCacheEntry | null {
   if (!lastScreenshotCache) {
     return null;
@@ -6278,8 +6281,14 @@ function getReusableScreenshot(
   if (lastScreenshotCache.regionKey !== regionKey) {
     return null;
   }
-  const age = Date.now() - lastScreenshotCache.capturedAt;
-  if (age > SCREENSHOT_REUSE_WINDOW_MS) {
+  if (
+    !canReuseScreenshot(
+      purpose,
+      lastScreenshotCache.capturedAt,
+      Date.now(),
+      SCREENSHOT_REUSE_WINDOW_MS
+    )
+  ) {
     return null;
   }
   return lastScreenshotCache;

@@ -223,18 +223,40 @@ GUI_Operate runs on the execution desktop. A remote window is one visible surfac
 ### 6.3 Define the business process
 
 1. Expand **Configure a business workflow** under the RPA card.
-2. Enter a unique **Workflow name**, for example `HRMS attendance export`.
-3. Select **Application type**: local desktop, website/web ERP/HRMS, or Remote Desktop/Citrix.
-4. Enter **Application name, URL or remote host**, including enough context to identify the test tenant/account without credentials.
-5. Enter **Inputs / parameters (no passwords)**, such as `report_date`, `department`, and `output_folder`.
-6. Enter **Business steps** in order. Include how to select the correct record and what to do when it is missing or already exists.
-7. Enter **Success check and evidence**: specify what will be reopened/read back and the expected business values.
-8. Open **Process Studio** in the same form. Add ordered user-defined steps or put the application at a safe starting screen and click **Capture current screen** to retain a reference state. Reference captures are organizational data; describe them clearly and remove obsolete captures. Starting guided recording sends the retained images to the configured model with the workflow instructions.
-9. For a direct recipe, select each action and enter its semantic target/value. The first added step defaults to **Open application**. Use the installed launcher name on macOS/Windows or desktop ID accepted by `gtk-launch` on Linux, and use `{{parameter}}` placeholders for changing business inputs. Click **Save executable recipe**. Saving does not execute or validate the business outcome.
-10. For a learned process, click **Start guided recording in chat**. The button requires connected RPA and a configured model. Approve the plan, let the agent sense and operate a small test case, and ensure it calls `save_recipe` after verification.
-11. Click **Save workflow draft**. Confirm the name appears in **Saved workflow configuration**, select it again, and verify fields, steps and reference captures reload. This does not create a scheduled task.
-12. Click **Prepare instructions** to inspect the resulting run contract. Use **Copy instructions** if needed.
-13. Select one-time, multi-slot daily, selected-day weekly, interval or HTTP-change timing. Resolve every readiness message and click **Create autonomous job** only after a supervised replay passes. Confirm the displayed next-run time and verify the task under **Settings → Schedule**. The scheduled agent uses the approved execution contract, invokes the recipe, resolves the credential profile inside GUI_Operate and reports evidence/postcondition status.
+2. For a ready-made starting point, click **Install autonomous workflow examples**. The app adds the five guarded drafts below. It does not create executable recipes or scheduled jobs, and it keeps any existing examples unchanged.
+3. Select an example or choose **New workflow**, then enter a unique **Workflow name**, for example `HRMS attendance export`. Rename every `[Example]` workflow and replace all placeholder application values before scheduling; readiness blocks unchanged examples.
+4. Select **Application type**: local desktop, website/web ERP/HRMS, or Remote Desktop/Citrix.
+5. Enter **Application name, URL or remote host**, including enough context to identify the test tenant/account without credentials.
+6. Enter **Inputs / parameters (no passwords)**, such as `report_date`, `department`, and `output_folder`.
+7. Enter **Business steps** in order. Include how to select the correct record and what to do when it is missing or already exists.
+8. Enter **Success check and evidence**: specify what will be reopened/read back and the expected business values.
+9. Open **Process Studio** in the same form. Add ordered user-defined steps or put the application at a safe starting screen and click **Capture current screen** to retain a reference state. Reference captures are organizational data; describe them clearly and remove obsolete captures. Starting guided recording sends the retained images to the configured model with the workflow instructions.
+10. For a direct recipe, select each action and enter its semantic target/value. The first added step defaults to **Open application**. Use the installed launcher name on macOS/Windows or desktop ID accepted by `gtk-launch` on Linux, and use `{{parameter}}` placeholders for changing business inputs. Click **Save executable recipe**. Saving does not execute or validate the business outcome.
+11. For a learned process, click **Start guided recording in chat**. The button requires connected RPA and a configured model. Approve the plan, let the agent sense and operate a small test case, and ensure it calls `save_recipe` after verification.
+12. Click **Save workflow draft**. Confirm the name appears in **Saved workflow configuration**, select it again, and verify fields, steps and reference captures reload. This does not create a scheduled task.
+13. Click **Prepare instructions** to inspect the resulting run contract. Use **Copy instructions** if needed.
+14. Select one-time, multi-slot daily, selected-day weekly, interval or HTTP-change timing. Resolve every readiness message and click **Create autonomous job** only after a supervised replay passes. Confirm the displayed next-run time and verify the task under **Settings → Schedule**. The scheduled agent uses the approved execution contract, invokes the recipe, resolves the credential profile inside GUI_Operate and reports evidence/postcondition status.
+
+### 6.4 Included autonomous workflow examples
+
+| Saved draft                                      | Scenario                                                                                              | Schedule already filled                                                 | What the IT user must customize                                                                                                           |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `[Example] One-time desktop app check`           | Calculate `12 + 8 = 20`, then `× 5 = 100`, then `− 25 = 75`; independently require final display `75` | One time; choose a future date/time                                     | Rename; confirm the platform launcher and keyboard input; set the run time; verify final result and failure evidence in supervised replay |
+| `[Example] Daily ERP exception review`           | Read-only ERP exception refresh                                                                       | Daily at 09:00 and 18:00                                                | ERP client, tenant/unit, semantic targets, parameters, evidence and credential profile                                                    |
+| `[Example] Weekly HRMS attendance export`        | Parameterized HRMS export and file verification                                                       | Monday at 10:00                                                         | HRMS test URL, browser route, department/week inputs, download path and result checks                                                     |
+| `[Example] Repeating desktop queue monitor`      | Read-only queue count and threshold alert                                                             | Every 30 minutes; first run defaults to five minutes after job creation | Queue application, queue name, target descriptions, threshold and execution desktop                                                       |
+| `[Example] HTTP-triggered reconciliation review` | Alert-driven batch reconciliation                                                                     | HTTP watch; URL intentionally blank                                     | Authorized trigger URL, reconciliation app, payload mapping, totals and mismatch handling                                                 |
+
+The samples are documentation-backed drafts, not proof that a business system is compatible. Use a test tenant/account, replace every placeholder, record or define the executable route, run it under supervision, verify the business postcondition, and then create the autonomous job. Re-running **Install autonomous workflow examples** skips examples already saved so local edits are preserved.
+
+For the Calculator example, a successful autonomous run reports 10 completed steps and then performs a separate fresh-screen verification. The expected report is **Success**, Calculator frontmost, no blocking dialog, and display exactly `75`. Recipe-step completion by itself is not accepted as the business result.
+
+Error handling is fail-closed:
+
+- A missing recipe or credential, locked execution desktop, wrong foreground application or unexpected dialog blocks the run before unsafe input continues.
+- A rejected action or recipe-step error reports the failed step and keeps the captured evidence.
+- A result other than `75`, stale evidence or an unreadable display reports **Failed** or **Blocked** and does not blindly retry.
+- Open **Settings → Schedule** to find the last-run time, recent session ID and connector/scheduler error. Open the corresponding `[Scheduled]` session from the session list for the structured status, completed-step count, evidence paths, postcondition result and required operator action. A session marked **Finished** only means agent execution ended; use the structured postcondition result for business success.
 
 Use the downloadable [workflow brief](user-guide-templates/rpa-workflow-brief.md) for process ownership, sample inputs, exception cases and sign-off.
 

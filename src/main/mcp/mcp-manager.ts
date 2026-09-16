@@ -2164,6 +2164,7 @@ function shouldHotReloadGuiVisionServer(
   }
 
   return (
+    /Unsupported parameter:\s*['"]?max_tokens['"]?/.test(errorMessage) ||
     errorMessage.includes('Unsupported parameter: max_output_tokens') ||
     errorMessage.includes('Instructions are required') ||
     errorMessage.includes('Stream must be set to true')

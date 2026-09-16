@@ -7,6 +7,8 @@ import {
   type RpaWorkflowBrief,
   type SavedRpaWorkflowConfiguration,
 } from '../../../shared/rpa-workflow';
+import { getRpaAutonomousReadinessIssues } from '../../../shared/rpa-autonomous-readiness';
+import { RPA_WORKFLOW_EXAMPLES } from '../../../shared/rpa-workflow-examples';
 import type { ContentBlock, ScheduleCreateInput } from '../../types';
 import { RpaProcessStudio } from './RpaProcessStudio';
 
@@ -83,57 +85,6 @@ function nextScheduleSlot(times: string[], weekdays?: number[]): number {
     }
   }
   throw new Error('Could not calculate the next scheduled run.');
-}
-
-export function getRpaAutonomousReadinessIssues(
-  brief: RpaWorkflowBrief,
-  options: {
-    connected: boolean;
-    configured: boolean;
-    recipeNames: string[];
-    now?: number;
-  }
-): string[] {
-  const issues: string[] = [];
-  const now = options.now ?? Date.now();
-  if (!options.connected) issues.push('Enable and connect RPA.');
-  if (!options.configured) issues.push('Configure an AI provider and model.');
-  if (
-    ![brief.name, brief.application, brief.steps, brief.successCheck].every((value) => value.trim())
-  ) {
-    issues.push('Complete the workflow name, application, business steps and success check.');
-  }
-  if (brief.executionMode === 'headless') {
-    issues.push('Desktop recipes require UI or Background execution mode.');
-  }
-  const recipeExists = options.recipeNames.some(
-    (name) => name.toLowerCase() === brief.name.trim().toLowerCase()
-  );
-  if (!recipeExists && (brief.definedSteps?.length || 0) === 0) {
-    issues.push('Add at least one Process Studio step or finish and save a guided recording.');
-  }
-  if (!brief.trigger || brief.trigger === 'manual') {
-    issues.push('Choose an autonomous trigger.');
-  } else if (brief.trigger === 'once') {
-    const runAt = brief.scheduleAt ? new Date(brief.scheduleAt).getTime() : NaN;
-    if (!Number.isFinite(runAt) || runAt <= now) issues.push('Choose a future one-time run.');
-  } else if (brief.trigger === 'daily' && (brief.scheduleTimes?.length || 0) === 0) {
-    issues.push('Add at least one daily time slot.');
-  } else if (brief.trigger === 'weekly') {
-    if ((brief.scheduleWeekdays?.length || 0) === 0) issues.push('Select at least one weekday.');
-    if ((brief.scheduleTimes?.length || 0) === 0) issues.push('Add at least one weekly time slot.');
-  } else if (brief.trigger === 'interval') {
-    const firstRun = brief.scheduleAt ? new Date(brief.scheduleAt).getTime() : null;
-    if (firstRun !== null && (!Number.isFinite(firstRun) || firstRun <= now)) {
-      issues.push('Choose a future first run or leave it blank to start in five minutes.');
-    }
-    if (!Number.isFinite(brief.repeatEvery) || (brief.repeatEvery || 0) < 1) {
-      issues.push('Repeat interval must be at least 1.');
-    }
-  } else if (brief.trigger === 'watch' && !brief.watchUrl?.trim()) {
-    issues.push('Enter the HTTP trigger URL.');
-  }
-  return issues;
 }
 
 function toLocalDateTimeMinimum(timestamp: number): string {
@@ -230,10 +181,41 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
       setBrief(savedWorkflowToBrief(saved));
       setSelectedWorkflow(saved.name);
       setStatus(
-        `Workflow draft “${saved.name}” saved. No autonomous job was created; use Create autonomous job after readiness is clear.`
+        `Workflow draft “${saved.name}” saved. To run it autonomously, select a trigger, clear every readiness item below, click Create autonomous job, then verify the job in Settings → Schedule.`
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save workflow configuration.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function installExampleWorkflows() {
+    setBusy(true);
+    setError('');
+    setStatus('');
+    try {
+      const existingNames = new Set(savedWorkflows.map((workflow) => workflow.name.toLowerCase()));
+      const installed: SavedRpaWorkflowConfiguration[] = [];
+      for (const example of RPA_WORKFLOW_EXAMPLES) {
+        if (existingNames.has(example.name.toLowerCase())) continue;
+        const result = await window.electronAPI.rpaWorkflows.save(example);
+        if (!result.success || !result.workflow) {
+          throw new Error(result.error || `Could not install ${example.name}.`);
+        }
+        installed.push(result.workflow);
+      }
+      if (installed.length > 0) {
+        setSavedWorkflows((current) => [...installed, ...current]);
+        setBrief(savedWorkflowToBrief(installed[0]));
+        setSelectedWorkflow(installed[0].name);
+      }
+      const skipped = RPA_WORKFLOW_EXAMPLES.length - installed.length;
+      setStatus(
+        `${installed.length} example workflow draft${installed.length === 1 ? '' : 's'} installed${skipped ? `; ${skipped} existing example${skipped === 1 ? '' : 's'} kept unchanged` : ''}. Examples do not create jobs. Open one, customize and rename it, clear readiness, then click Create autonomous job.`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not install example workflows.');
     } finally {
       setBusy(false);
     }
@@ -535,6 +517,19 @@ export function RpaWorkflowSetup({ connected }: { connected: boolean }) {
               Delete saved workflow
             </button>
           </div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void installExampleWorkflows()}
+            className="px-3 py-2 rounded bg-surface-muted text-sm text-text-primary disabled:opacity-50"
+          >
+            Install autonomous workflow examples
+          </button>
+          <p className="text-xs text-text-muted">
+            Installs one guarded draft for one-time, daily, weekly, repeating interval and HTTP
+            alert schedules. Existing examples are kept unchanged. No recipe or scheduled job is
+            created until you customize an example and click Create autonomous job.
+          </p>
           <label className="block text-xs text-text-secondary">
             Workflow name
             <input
