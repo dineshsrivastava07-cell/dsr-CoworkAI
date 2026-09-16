@@ -45,6 +45,17 @@ describe('advanced WinRM transport', () => {
     ).toThrow('DOMAIN');
   });
 
+  it('blocks Basic authentication over unencrypted HTTP', () => {
+    expect(() =>
+      getWinrmConnectionSettings({
+        ...base,
+        username: 'localadmin',
+        winrmAuth: 'basic',
+        winrmTransport: 'http',
+      })
+    ).toThrow('requires HTTPS');
+  });
+
   it('passes HTTPS and auth-compatible credentials to the maintained client', async () => {
     mock.runPowershell.mockResolvedValueOnce('[{"CookedValue":12,"InstanceName":"_Total"}]');
     const result = await diagnoseWinrm(

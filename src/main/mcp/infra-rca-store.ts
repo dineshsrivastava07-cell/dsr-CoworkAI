@@ -7,7 +7,7 @@ import {
 import { log, logWarn } from '../utils/logger';
 import type { TargetCredentials } from './infra-drivers/types';
 import type { InfraRcaImportInput, InfraRcaImportResult } from '../../shared/ipc-types';
-import { planInfraImport, validateTarget } from './infra-rca-import';
+import { mergeInfraTargetUpdate, planInfraImport, validateTarget } from './infra-rca-import';
 
 interface InfraRcaStoreShape {
   targets: TargetCredentials[];
@@ -19,6 +19,7 @@ export type PublicTargetInfo = Pick<
   | 'name'
   | 'protocol'
   | 'host'
+  | 'port'
   | 'group'
   | 'winrmTransport'
   | 'winrmAuth'
@@ -65,6 +66,7 @@ class InfraRcaStore {
           name,
           protocol,
           host,
+          port,
           group,
           winrmTransport,
           winrmAuth,
@@ -74,6 +76,7 @@ class InfraRcaStore {
           name,
           protocol,
           host,
+          port,
           group,
           winrmTransport,
           winrmAuth,
@@ -111,7 +114,8 @@ class InfraRcaStore {
       throw new Error('A target with this name already exists.');
     }
     const existingIndex = targets.findIndex((t) => t.id === id);
-    const saved: TargetCredentials = { ...target, id };
+    const existing = existingIndex >= 0 ? targets[existingIndex] : undefined;
+    const saved = mergeInfraTargetUpdate(existing, target, id);
     validateTarget(saved);
     if (existingIndex >= 0) {
       targets[existingIndex] = saved;

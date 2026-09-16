@@ -40,8 +40,14 @@ export function getWinrmConnectionSettings(target: TargetCredentials): {
   rejectUnauthorized: boolean;
 } {
   const useHttps = isHttpsTransport(target);
+  const auth = authFor(target);
+  if (auth === 'basic' && !useHttps) {
+    throw new Error(
+      'WinRM Basic authentication requires HTTPS in V-Coworker. Use NTLM/Kerberos or configure an approved HTTPS listener.'
+    );
+  }
   return {
-    auth: authFor(target),
+    auth,
     useHttps,
     port: target.port || (useHttps ? 5986 : 5985),
     rejectUnauthorized: target.winrmRejectUnauthorized ?? true,
@@ -113,6 +119,14 @@ async function runPs(target: TargetCredentials, command: string): Promise<string
     settings.port,
     settings.useHttps,
     settings.rejectUnauthorized
+  );
+}
+
+/** Read-only authenticated WS-Man probe used after TCP reachability succeeds. */
+export async function probeWinrm(target: TargetCredentials): Promise<void> {
+  await runPs(
+    target,
+    '[pscustomobject]@{ComputerName=$env:COMPUTERNAME;PowerShell=$PSVersionTable.PSVersion.ToString()} | ConvertTo-Json -Compress'
   );
 }
 

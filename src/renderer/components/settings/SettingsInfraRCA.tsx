@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { AlertCircle, ChevronDown, Loader2, Plus, Server, Trash2 } from 'lucide-react';
+import { AlertCircle, ChevronDown, Loader2, Pencil, Plus, Server, Trash2 } from 'lucide-react';
 import type {
   InfraRcaProtocol,
   InfraRcaTargetInput,
@@ -29,7 +29,7 @@ const emptyForm: InfraRcaTargetInput = {
   dbEngine: 'postgres',
   dbName: '',
   community: '',
-  winrmTransport: 'http',
+  winrmTransport: 'https',
   winrmAuth: 'auto',
   winrmRejectUnauthorized: true,
 };
@@ -110,6 +110,23 @@ export function SettingsInfraRCA({
     } catch (err) {
       console.error('Failed to delete target:', err);
     }
+  }
+
+  function handleEdit(target: InfraRcaTargetPublic) {
+    setError('');
+    setForm({
+      ...emptyForm,
+      id: target.id,
+      name: target.name,
+      protocol: target.protocol,
+      host: target.host,
+      port: target.port,
+      group: target.group || '',
+      winrmTransport: target.winrmTransport || 'https',
+      winrmAuth: target.winrmAuth || 'auto',
+      winrmRejectUnauthorized: target.winrmRejectUnauthorized !== false,
+    });
+    setShowAddForm(true);
   }
 
   async function handleTestConnection(id: string) {
@@ -232,6 +249,7 @@ export function SettingsInfraRCA({
                     <div className="text-sm font-medium text-text-primary">{target.name}</div>
                     <div className="text-xs text-text-muted">
                       {PROTOCOL_LABELS[target.protocol]} · {target.host}{' '}
+                      {target.port ? `:${target.port} ` : ''}
                       {target.group ? `· ${target.group}` : ''}
                       {target.protocol === 'winrm'
                         ? ` · ${(target.winrmAuth || 'auto').toUpperCase()} / ${(target.winrmTransport || 'http').toUpperCase()}`
@@ -252,6 +270,13 @@ export function SettingsInfraRCA({
                       ) : (
                         'Test'
                       )}
+                    </button>
+                    <button
+                      onClick={() => handleEdit(target)}
+                      className="p-1 rounded-md hover:bg-surface-active text-text-muted hover:text-text-primary"
+                      aria-label={`Edit ${target.name}`}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => handleDelete(target.id)}
@@ -281,6 +306,7 @@ export function SettingsInfraRCA({
                 <label className="block text-xs font-medium text-text-primary mb-1">Protocol</label>
                 <select
                   value={form.protocol}
+                  disabled={Boolean(form.id)}
                   onChange={(e) =>
                     setForm({ ...form, protocol: e.target.value as InfraRcaProtocol })
                   }
@@ -300,6 +326,28 @@ export function SettingsInfraRCA({
                   value={form.host}
                   onChange={(e) => setForm({ ...form, host: e.target.value })}
                   placeholder="10.0.0.5"
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-text-primary text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent/30"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-text-primary mb-1">
+                  Port (optional)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={form.port ?? ''}
+                  onChange={(e) =>
+                    setForm({ ...form, port: e.target.value ? Number(e.target.value) : undefined })
+                  }
+                  placeholder={
+                    form.protocol === 'winrm'
+                      ? form.winrmTransport === 'https'
+                        ? '5986'
+                        : '5985'
+                      : 'Protocol default'
+                  }
                   className="w-full px-3 py-2 rounded-lg bg-background border border-border text-text-primary text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent/30"
                 />
               </div>
@@ -336,7 +384,9 @@ export function SettingsInfraRCA({
                         ? '(or leave blank if using a key)'
                         : form.protocol === 'winrm' && form.winrmAuth === 'kerberos'
                           ? '(not used; current Windows ticket is used)'
-                          : ''}
+                          : form.id
+                            ? '(leave blank to keep the existing encrypted password)'
+                            : ''}
                     </label>
                     <input
                       type="password"
@@ -355,6 +405,9 @@ export function SettingsInfraRCA({
                             setForm({
                               ...form,
                               winrmAuth: e.target.value as InfraRcaTargetInput['winrmAuth'],
+                              ...(e.target.value === 'basic'
+                                ? { winrmTransport: 'https', port: undefined }
+                                : {}),
                             })
                           }
                           className="mt-1 w-full px-3 py-2 rounded-lg bg-background border border-border text-text-primary text-sm"
@@ -374,11 +427,14 @@ export function SettingsInfraRCA({
                               ...form,
                               winrmTransport: e.target
                                 .value as InfraRcaTargetInput['winrmTransport'],
+                              port: undefined,
                             })
                           }
                           className="mt-1 w-full px-3 py-2 rounded-lg bg-background border border-border text-text-primary text-sm"
                         >
-                          <option value="http">HTTP · 5985</option>
+                          <option value="http" disabled={form.winrmAuth === 'basic'}>
+                            HTTP · 5985
+                          </option>
                           <option value="https">HTTPS · 5986</option>
                         </select>
                       </label>
@@ -395,7 +451,8 @@ export function SettingsInfraRCA({
                       </label>
                       <p className="col-span-2 text-xs text-text-muted">
                         NTLM requires DOMAIN\\user or user@domain. Kerberos uses the logged-in
-                        Windows domain ticket and is unavailable from macOS/Linux.
+                        Windows domain ticket and is unavailable from macOS/Linux. Basic is allowed
+                        only over HTTPS; selecting Basic automatically selects HTTPS.
                       </p>
                     </div>
                   )}
@@ -425,7 +482,7 @@ export function SettingsInfraRCA({
                   className="flex-1 py-2 px-4 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                 >
                   {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  Save target
+                  {form.id ? 'Update target' : 'Save target'}
                 </button>
                 <button
                   onClick={() => {

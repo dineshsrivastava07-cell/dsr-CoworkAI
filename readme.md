@@ -142,6 +142,8 @@ Expand **Bulk import systems (CSV / JSON)**, download the CSV template, and uplo
 
 Search and page through systems by name, host, protocol or group/site. The agent's `infra_list_targets` tool also supports `query`, `group`, `offset` and `limit` so large inventories are not silently truncated. Import registers targets; it does not run a fleet-wide network scan.
 
+For Windows targets, **Test** now verifies the complete readiness chain: selected OS route, both standard WinRM ports, evidence that the Windows host itself answers, HTTPS/TLS, and an authenticated read-only WS-Man request. A reachable host with closed WinRM listeners is reported as `WINRM_LISTENER_UNAVAILABLE` instead of a generic network/password failure. Use the pencil button to correct transport, authentication or a custom port without replacing the encrypted password. Basic authentication is restricted to HTTPS. The result includes read-only target checks and a separate administrator-repair block; Test never applies those changes.
+
 See the [Infra RCA and RPA operating guide](INFRA-RPA-OPERATIONS.md) for templates, credential updates, setup steps, accuracy checks and current execution limits.
 
 ### Ollama Custom Models

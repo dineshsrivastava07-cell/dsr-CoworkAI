@@ -136,11 +136,54 @@ export function validateTarget(target: TargetCredentials): void {
       throw new Error(
         'Basic WinRM authentication requires a local username; use ntlm or kerberos for a domain account.'
       );
+    if (target.winrmAuth === 'basic' && target.winrmTransport !== 'https' && target.port !== 5986)
+      throw new Error(
+        'Basic WinRM authentication requires HTTPS; use NTLM/Kerberos or configure an approved HTTPS listener.'
+      );
   }
   if (target.protocol === 'snmp' && !target.community)
     throw new Error('SNMP requires a community string.');
   if (target.protocol === 'db' && !['postgres', 'mysql'].includes(target.dbEngine || ''))
     throw new Error('Database engine must be postgres or mysql.');
+}
+
+/** Preserve encrypted credentials when a same-protocol UI edit leaves secret fields blank. */
+export function mergeInfraTargetUpdate(
+  existing: TargetCredentials | undefined,
+  target: Omit<TargetCredentials, 'id'> & { id?: string },
+  id: string
+): TargetCredentials {
+  const canPreserve = existing?.protocol === target.protocol;
+  const preserveWhenBlank = <K extends keyof TargetCredentials>(key: K) => {
+    const incoming = target[key];
+    return incoming === undefined || incoming === ''
+      ? canPreserve
+        ? existing?.[key]
+        : undefined
+      : incoming;
+  };
+  const merged = {
+    ...(canPreserve ? existing : undefined),
+    ...target,
+    id,
+    username: preserveWhenBlank('username') as string | undefined,
+    secret: preserveWhenBlank('secret') as string | undefined,
+    privateKey: preserveWhenBlank('privateKey') as string | undefined,
+    passphrase: preserveWhenBlank('passphrase') as string | undefined,
+    community: preserveWhenBlank('community') as string | undefined,
+    dbName: preserveWhenBlank('dbName') as string | undefined,
+  } as TargetCredentials;
+  for (const key of [
+    'username',
+    'secret',
+    'privateKey',
+    'passphrase',
+    'community',
+    'dbName',
+  ] as const) {
+    if (merged[key] === undefined) delete merged[key];
+  }
+  return merged;
 }
 
 /** Pure plan: credentials stay in nextTargets, never in the public preview/result. */

@@ -2574,7 +2574,10 @@ ipcMain.handle(
       return { success: true, id: saved.id };
     } catch (error) {
       logError('[InfraRCA] Error saving target:', error);
-      return { success: false, error: 'Failed to save target.' };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to save target.',
+      };
     }
   }
 );
@@ -2594,7 +2597,10 @@ ipcMain.handle('infraRca.testConnection', async (_event, id: string) => {
   if (!full) {
     return { reachable: false, error: 'Target not found.' };
   }
-  return checkInfraConnection(full);
+  return checkInfraConnection(full, 5000, {
+    advancedWinrm: full.protocol === 'winrm',
+    verifyLogin: full.protocol === 'winrm',
+  });
 });
 
 // Skills API handlers

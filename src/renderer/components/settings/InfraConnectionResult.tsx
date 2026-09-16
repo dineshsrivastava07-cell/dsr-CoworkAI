@@ -18,12 +18,33 @@ export function InfraConnectionResult({
         )}
         <span>
           {result.reachable
-            ? `${protocol === 'snmp' ? 'SNMP responded' : 'TCP reachable (login not tested)'} (${result.latencyMs ?? 0}ms)`
+            ? `${protocol === 'snmp' ? 'SNMP responded' : result.authenticated ? 'WinRM authenticated and ready' : 'TCP reachable (login not tested)'} (${result.latencyMs ?? 0}ms)`
             : result.error || 'Connection failed'}
           {result.port ? ` · Port ${result.port}` : ''}
           {result.errorCode ? ` · ${result.errorCode}` : ''}
         </span>
       </div>
+      {result.networkPath && (
+        <div className="rounded bg-surface-muted p-2 text-text-secondary">
+          <div className="font-medium text-text-primary">Network path</div>
+          <div>{result.networkPath.summary}</div>
+        </div>
+      )}
+      {!!result.probes?.length && (
+        <details open className="text-text-secondary">
+          <summary className="cursor-pointer">Port and service probes</summary>
+          <ul className="mt-1 space-y-1">
+            {result.probes.map((probe) => (
+              <li key={`${probe.service}-${probe.port}`}>
+                {probe.service} · TCP {probe.port} ·{' '}
+                {probe.reachable
+                  ? `reachable (${probe.latencyMs ?? 0}ms)`
+                  : probe.errorCode || 'failed'}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {!!result.nextSteps?.length && (
         <ol className="list-decimal pl-4 space-y-1 text-text-secondary">
           {result.nextSteps.map((step) => (
@@ -41,6 +62,20 @@ export function InfraConnectionResult({
           </p>
           <pre className="whitespace-pre-wrap break-words p-2 rounded bg-surface-muted select-text">
             {result.localChecks.join('\n')}
+          </pre>
+        </details>
+      )}
+      {!!result.remediationCommands?.length && (
+        <details className="text-text-secondary">
+          <summary className="cursor-pointer text-warning">
+            Administrator repair (changes the Windows target)
+          </summary>
+          <p className="my-2">
+            Run only through your approved endpoint-management, Group Policy, RDP or local
+            administrator process. Test never runs these commands automatically.
+          </p>
+          <pre className="whitespace-pre-wrap break-words p-2 rounded bg-surface-muted select-text">
+            {result.remediationCommands.join('\n')}
           </pre>
         </details>
       )}

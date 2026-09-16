@@ -48,9 +48,9 @@ Non-empty row values override shared values. For updates, omitted/blank optional
 
 ## Use Infra RCA after import
 
-Use the search field to filter the inventory by name, host, protocol or group; the UI displays 50 entries per page. The **Test** button checks TCP reachability for SSH, WinRM and databases, without verifying login or diagnostic privileges. For SNMP it sends a read-only request and requires a response.
+Use the search field to filter the inventory by name, host, protocol or group; the UI displays 50 entries per page. The **Test** button checks TCP reachability for SSH and databases. For WinRM it inspects the selected route, probes the configured and standard HTTP/HTTPS listeners, distinguishes a reachable Windows host from a missing listener, and then verifies login with a read-only WS-Man request. For SNMP it sends a read-only request and requires a response.
 
-Failed checks show the error category, tested port and corrective steps. WinRM results include expandable read-only Windows checks and the selected transport/authentication policy. The chat tool `infra_ping_check` shares the same protocol-aware check and marks failed readiness as a tool error. Use `infra_capabilities` and `infra_expert_assess` for protocol-aware coverage and quick/full expert read-only assessments. See [WinRM troubleshooting](IT-USER-GUIDE.md#winrm-host-unreachable-timeout-or-connection-refused) for host-down, timeout and refused-connection procedures.
+Failed checks show the stage, route, per-port evidence, error category and corrective steps. `WINRM_LISTENER_UNAVAILABLE` means Windows is reachable but WinRM must be provisioned locally, through RDP, endpoint management or Group Policy. WinRM results include expandable read-only Windows checks and a separate administrator-repair block that **Test never executes**. Use the pencil button to update a target while preserving its encrypted password when the password field is blank. The chat tool `infra_ping_check` shares the same protocol-aware check and marks failed readiness as a tool error. Use `infra_capabilities` and `infra_expert_assess` for protocol-aware coverage and quick/full expert read-only assessments. See [WinRM troubleshooting](IT-USER-GUIDE.md#winrm-host-unreachable-timeout-or-connection-refused) for host-down, timeout and refused-connection procedures.
 
 Example chat requests:
 

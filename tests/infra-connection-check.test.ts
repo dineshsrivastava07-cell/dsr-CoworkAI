@@ -9,7 +9,9 @@ import {
 import { InfraConnectionResult } from '../src/renderer/components/settings/InfraConnectionResult';
 
 const snmp = vi.hoisted(() => ({ probe: vi.fn() }));
+const winrm = vi.hoisted(() => ({ probe: vi.fn() }));
 vi.mock('../src/main/mcp/infra-drivers/snmp-driver', () => ({ probeSnmp: snmp.probe }));
+vi.mock('../src/main/mcp/infra-drivers/winrm-driver', () => ({ probeWinrm: winrm.probe }));
 const target = {
   id: 'qa',
   name: 'qa-windows',
@@ -22,6 +24,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
   snmp.probe.mockReset();
+  winrm.probe.mockReset();
 });
 
 describe('Infra RCA connection diagnostics', () => {
@@ -48,7 +51,7 @@ describe('Infra RCA connection diagnostics', () => {
     expect(html).toContain('ECONNREFUSED');
     expect(html).toContain('Windows IT checks (read-only)');
     expect(html).toContain('winrm enumerate winrm/config/listener');
-    expect(html).toContain('Basic/NTLM over HTTP is supported');
+    expect(html).toContain('automatic local Basic/domain NTLM selection');
     expect(html).not.toContain('fixture-secret');
   });
 
@@ -107,6 +110,74 @@ describe('Infra RCA connection diagnostics', () => {
     }
     const refused = await checkInfraConnection(endpoint);
     expect(refused).toMatchObject({ reachable: false, errorCode: 'ECONNREFUSED' });
+  });
+
+  it('runs the authenticated read-only WinRM probe after the configured listener answers', async () => {
+    const configuredPort = 61234;
+    winrm.probe.mockResolvedValueOnce(undefined);
+    const result = await checkInfraConnection(
+      { ...target, port: configuredPort, winrmTransport: 'https' },
+      250,
+      {
+        advancedWinrm: true,
+        verifyLogin: true,
+        inspectNetworkPath: async () => ({
+          interface: 'test0',
+          sourceAddress: '127.0.0.1',
+          vpnInterface: false,
+          summary: 'test route',
+        }),
+        probeTcp: async (_host, port, service) => ({
+          port,
+          service,
+          reachable: port === configuredPort,
+          ...(port === configuredPort ? { latencyMs: 1 } : { errorCode: 'ECONNREFUSED' }),
+        }),
+      }
+    );
+    expect(result).toMatchObject({
+      reachable: true,
+      authenticated: true,
+      check: 'winrm',
+      stage: 'ready',
+      port: configuredPort,
+    });
+    expect(result.probes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ port: configuredPort, reachable: true })])
+    );
+    expect(winrm.probe).toHaveBeenCalledOnce();
+  });
+
+  it('distinguishes a reachable Windows host from a missing WinRM listener', async () => {
+    const result = await checkInfraConnection(target, 250, {
+      advancedWinrm: true,
+      inspectNetworkPath: async () => ({
+        interface: 'en0',
+        sourceAddress: '127.0.0.1',
+        vpnInterface: false,
+        summary: 'direct test route',
+      }),
+      probeTcp: async (_host, port, service) => ({
+        port,
+        service,
+        reachable: port === 135,
+        ...(port === 135 ? { latencyMs: 1 } : { errorCode: 'ECONNREFUSED' }),
+      }),
+    });
+    expect(result).toMatchObject({
+      reachable: false,
+      check: 'winrm',
+      stage: 'host',
+      errorCode: 'WINRM_LISTENER_UNAVAILABLE',
+    });
+    expect(result.error).toContain('Windows host is reachable');
+    expect(result.probes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ port: 5985, reachable: false }),
+        expect.objectContaining({ port: 5986, reachable: false }),
+      ])
+    );
+    expect(result.remediationCommands).toContain('Enable-PSRemoting -Force');
   });
 
   it('times out a stalled socket and destroys it without leaving a timer', async () => {

@@ -83,16 +83,39 @@ export type InfraRcaProtocol = 'ssh' | 'winrm' | 'snmp' | 'db';
 export type InfraRcaWinrmTransport = 'http' | 'https';
 export type InfraRcaWinrmAuth = 'basic' | 'ntlm' | 'kerberos' | 'auto';
 
-export interface InfraRcaConnectionResult {
+export interface InfraRcaPortProbe {
+  port: number;
+  service: string;
   reachable: boolean;
   latencyMs?: number;
+  errorCode?: string;
+}
+
+export interface InfraRcaNetworkPath {
+  interface?: string;
+  sourceAddress?: string;
+  gateway?: string;
+  usesDefaultRoute?: boolean;
+  vpnInterface: boolean;
+  summary: string;
+}
+
+export interface InfraRcaConnectionResult {
+  reachable: boolean;
+  authenticated?: boolean;
+  latencyMs?: number;
   error?: string;
-  check?: 'tcp' | 'snmp';
+  check?: 'tcp' | 'snmp' | 'winrm';
+  stage?: 'dns' | 'route' | 'host' | 'tcp' | 'tls' | 'authentication' | 'ready';
   port?: number;
   errorCode?: string;
   nextSteps?: string[];
+  probes?: InfraRcaPortProbe[];
+  networkPath?: InfraRcaNetworkPath;
   /** Read-only checks to run locally on the affected Windows computer. */
   localChecks?: string[];
+  /** Administrator commands that change the Windows target; never executed by Test. */
+  remediationCommands?: string[];
   limitation?: string;
 }
 
@@ -102,6 +125,7 @@ export interface InfraRcaTargetPublic {
   name: string;
   protocol: InfraRcaProtocol;
   host: string;
+  port?: number;
   group?: string;
   winrmTransport?: InfraRcaWinrmTransport;
   winrmAuth?: InfraRcaWinrmAuth;

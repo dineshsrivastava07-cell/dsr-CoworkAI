@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planInfraImport } from '../src/main/mcp/infra-rca-import';
+import { mergeInfraTargetUpdate, planInfraImport } from '../src/main/mcp/infra-rca-import';
 import { selectInfraTargetPage } from '../src/main/mcp/infra-target-page';
 import type { InfraRcaImportInput } from '../src/shared/ipc-types';
 import type { TargetCredentials } from '../src/main/mcp/infra-drivers/types';
@@ -86,6 +86,33 @@ describe('bulk infrastructure import', () => {
     );
     expect(result).toMatchObject({ success: true, updated: 1 });
     expect(nextTargets).toEqual([{ ...old, group: 'Delhi', port: undefined }]);
+  });
+
+  it('keeps encrypted credentials when the same-protocol edit leaves them blank', () => {
+    expect(
+      mergeInfraTargetUpdate(
+        old,
+        {
+          ...old,
+          id: undefined,
+          host: '10.0.0.2',
+          username: '',
+          secret: '',
+          port: 2222,
+        },
+        old.id
+      )
+    ).toEqual({ ...old, host: '10.0.0.2', port: 2222 });
+  });
+
+  it('does not carry credentials into a protocol change', () => {
+    expect(
+      mergeInfraTargetUpdate(
+        old,
+        { name: old.name, host: old.host, protocol: 'snmp', community: '' },
+        old.id
+      )
+    ).not.toHaveProperty('secret');
   });
 
   it('uses explicit row credentials ahead of shared credentials', () => {

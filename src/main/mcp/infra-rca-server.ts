@@ -299,7 +299,7 @@ function createMcpServer() {
         {
           name: 'infra_ping_check',
           description:
-            'Readiness check: TCP reachability (not login) for SSH/WinRM/database targets, or a read-only SNMP probe. Returns failure category and corrective checks; use before a full diagnose.',
+            'Readiness check: TCP reachability for SSH/database targets, staged route/listener/TLS/authenticated read-only verification for WinRM, or a read-only SNMP probe. Returns the first failing stage, evidence and corrective checks; use before a full diagnose.',
           inputSchema: {
             type: 'object',
             properties: { target_name: { type: 'string' } },
@@ -491,7 +491,10 @@ function createMcpServer() {
         case 'infra_ping_check': {
           const { target_name } = args as { target_name: string };
           const target = await resolveTarget(target_name);
-          const result = await checkInfraConnection(target);
+          const result = await checkInfraConnection(target, 5000, {
+            advancedWinrm: target.protocol === 'winrm',
+            verifyLogin: target.protocol === 'winrm',
+          });
           return {
             isError: !result.reachable,
             content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
