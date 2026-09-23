@@ -101,6 +101,7 @@ interface AppState {
   sidebarCollapsed: boolean;
   contextPanelCollapsed: boolean;
   showSettings: boolean;
+  showTableauDashboard: boolean;
   settingsTab: string | null;
 
   // Permission
@@ -170,6 +171,7 @@ interface AppState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   setContextPanelCollapsed: (collapsed: boolean) => void;
   setShowSettings: (show: boolean) => void;
+  setShowTableauDashboard: (show: boolean) => void;
   setSettingsTab: (tab: string | null) => void;
 
   setPendingPermission: (permission: PermissionRequest | null) => void;
@@ -235,6 +237,12 @@ const defaultSettings: Settings = {
     { tool: 'mcp__Infra_RCA__infra_diagnose', action: 'allow' },
     { tool: 'mcp__Infra_RCA__infra_propose_fix', action: 'allow' },
     { tool: 'mcp__Infra_RCA__infra_ping_check', action: 'allow' },
+    { tool: 'mcp__Tableau__tableau_connection_status', action: 'allow' },
+    { tool: 'mcp__Tableau__tableau_analyze_question', action: 'allow' },
+    { tool: 'mcp__Tableau__tableau_list_views', action: 'allow' },
+    { tool: 'mcp__Tableau__tableau_get_view_data', action: 'allow' },
+    { tool: 'mcp__Tableau__tableau_get_role_summary', action: 'allow' },
+    { tool: 'mcp__Tableau__tableau_refresh_role_summaries', action: 'allow' },
   ],
   globalSkillsPath: '',
   memoryStrategy: 'auto',
@@ -252,6 +260,7 @@ export const useAppStore = create<AppState>((set) => ({
   sidebarCollapsed: false,
   contextPanelCollapsed: false,
   showSettings: false,
+  showTableauDashboard: false,
   settingsTab: null,
   pendingPermission: null,
   pendingSudoPassword: null,
@@ -584,6 +593,7 @@ export const useAppStore = create<AppState>((set) => ({
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
   setContextPanelCollapsed: (collapsed) => set({ contextPanelCollapsed: collapsed }),
   setShowSettings: (show) => set({ showSettings: show }),
+  setShowTableauDashboard: (show) => set({ showTableauDashboard: show }),
   setSettingsTab: (tab) => set({ settingsTab: tab }),
 
   // Permission actions
@@ -662,6 +672,7 @@ if (typeof window !== 'undefined') {
     const s = useAppStore.getState();
     return {
       showSettings: !!s.showSettings,
+      showTableauDashboard: !!s.showTableauDashboard,
       activeSessionId: s.activeSessionId || null,
       sessionCount: (s.sessions || []).length,
     };
@@ -671,15 +682,21 @@ if (typeof window !== 'undefined') {
     const store = useAppStore.getState();
     if (page === 'welcome') {
       store.setShowSettings(false);
+      store.setShowTableauDashboard(false);
       store.setActiveSession(null);
     } else if (page === 'settings') {
+      store.setShowTableauDashboard(false);
       store.setSettingsTab(tab || 'api');
       store.setShowSettings(true);
+    } else if (page === 'tableau') {
+      store.setShowSettings(false);
+      store.setShowTableauDashboard(true);
     } else if (page === 'session') {
       if (!sessionId || typeof sessionId !== 'string') return false;
       const exists = store.sessions.some((s) => s.id === sessionId);
       if (!exists) return false;
       store.setShowSettings(false);
+      store.setShowTableauDashboard(false);
       store.setActiveSession(sessionId);
     }
     return true;

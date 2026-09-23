@@ -72,6 +72,10 @@ import {
   stopGoogleTokenBroker,
 } from './google';
 import { startInfraRcaBroker, stopInfraRcaBroker } from './mcp/infra-rca-broker';
+import { startTableauBroker, stopTableauBroker } from './tableau/tableau-broker';
+import { tableauStore } from './tableau/tableau-store';
+import { tableauService } from './tableau/tableau-service';
+import type { TableauConfigInput } from '../shared/tableau-types';
 import { infraRcaStore } from './mcp/infra-rca-store';
 import { rpaCredentialStore } from './mcp/rpa-credential-store';
 import { rpaWorkflowStore } from './mcp/rpa-workflow-store';
@@ -971,6 +975,12 @@ app
       logError('[InfraRCA] Failed to start broker:', error);
     }
 
+    try {
+      await startTableauBroker();
+    } catch (error) {
+      logError('[Tableau] Failed to start broker:', error);
+    }
+
     // ── Headless mode ──────────────────────────────────────────────────
     const headlessArgs = parseHeadlessArgs();
 
@@ -1625,6 +1635,7 @@ async function cleanupSandboxResources(): Promise<void> {
   stopNavServer();
   await stopGoogleTokenBroker();
   await stopInfraRcaBroker();
+  await stopTableauBroker();
   stopConfigFileWatcher();
   skillsManager?.stopStorageMonitoring();
   scheduledTaskManager?.stop();
@@ -1716,6 +1727,7 @@ app.on('before-quit', async (event) => {
       stopNavServer();
       await stopGoogleTokenBroker();
       await stopInfraRcaBroker();
+      await stopTableauBroker();
       try {
         closeDatabase();
       } catch {
@@ -2299,6 +2311,68 @@ ipcMain.handle('mcp.getPresets', () => {
     logError('[MCP] Error getting presets:', error);
     return {};
   }
+});
+
+// Tableau connector. The password is accepted only on save and never returned.
+ipcMain.handle('tableau.getConfig', () => tableauStore.getPublicConfig());
+ipcMain.handle('tableau.saveConfig', (_event, input: TableauConfigInput) => {
+  try {
+    return { success: true, config: tableauStore.saveConfig(input) };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Could not save Tableau configuration.',
+    };
+  }
+});
+ipcMain.handle('tableau.testConnection', () => tableauService.getConnectionStatus());
+ipcMain.handle('tableau.getDashboardState', (_event, refresh = false) =>
+  tableauService.getDashboardState(Boolean(refresh))
+);
+ipcMain.handle('tableau.refreshSummaries', () => tableauService.getDashboardState(true));
+ipcMain.handle('tableau.listViews', () => tableauService.listViews());
+ipcMain.handle('tableau.getViewData', (_event, viewId: unknown, maxRows: unknown = 1_000) => {
+  if (typeof viewId !== 'string' || !viewId.trim()) {
+    throw new Error('A Tableau view ID is required.');
+  }
+  const parsedMaxRows = typeof maxRows === 'number' ? maxRows : Number(maxRows);
+  return tableauService.getViewData(
+    viewId.trim(),
+    Number.isFinite(parsedMaxRows) ? parsedMaxRows : 1_000
+  );
+});
+ipcMain.handle('tableau.getViewsData', (_event, viewIds: unknown, maxRows: unknown = 1_000) => {
+  if (!Array.isArray(viewIds) || !viewIds.every((viewId) => typeof viewId === 'string')) {
+    throw new Error('Tableau dashboard IDs must be provided as a list.');
+  }
+  const parsedMaxRows = typeof maxRows === 'number' ? maxRows : Number(maxRows);
+  return tableauService.getViewsData(
+    viewIds,
+    Number.isFinite(parsedMaxRows) ? parsedMaxRows : 1_000
+  );
+});
+ipcMain.handle('tableau.analyzeQuestion', (_event, input: unknown) => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('A Tableau analysis request is required.');
+  }
+  const request = input as Record<string, unknown>;
+  if (typeof request.question !== 'string' || !request.question.trim()) {
+    throw new Error('An analytical question is required.');
+  }
+  const role =
+    request.role === 'retail' || request.role === 'merchandiser' || request.role === 'planner'
+      ? request.role
+      : undefined;
+  return tableauService.analyzeQuestion({
+    question: request.question,
+    role,
+    domain: typeof request.domain === 'string' ? request.domain : undefined,
+    maxRows: typeof request.maxRows === 'number' ? request.maxRows : undefined,
+  });
+});
+ipcMain.handle('tableau.open', () => {
+  const url = tableauStore.getPublicConfig().baseUrl;
+  return shell.openExternal(`${url}/#/explore`);
 });
 
 // Google Workspace connector API handlers

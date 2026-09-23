@@ -70,6 +70,11 @@ const servers = [
     // same treatment tesseract.js/pdf-parse need above for their own reasons.
     extraExternals: ['ssh2', 'cpu-features', 'net-snmp', 'pg', 'mysql2', '@netcuras/nodejs-winrm'],
   },
+  {
+    name: 'tableau-server',
+    entry: 'tableau-server.ts',
+    description: 'Tableau MCP Server (read-only dashboard analysis)',
+  },
 ];
 
 const NODE_EXTERNALS = [
@@ -128,8 +133,7 @@ function sleep(ms) {
 
 function isRetryableFileOpError(error) {
   return Boolean(
-    error &&
-      (error.code === 'EBUSY' || error.code === 'EPERM' || error.code === 'ENOTEMPTY')
+    error && (error.code === 'EBUSY' || error.code === 'EPERM' || error.code === 'ENOTEMPTY')
   );
 }
 
@@ -255,7 +259,9 @@ async function bundleWithEsbuild() {
       platform: 'node',
       target: 'node20',
       format: 'cjs',
-      external: server.extraExternals ? [...NODE_EXTERNALS, ...server.extraExternals] : NODE_EXTERNALS,
+      external: server.extraExternals
+        ? [...NODE_EXTERNALS, ...server.extraExternals]
+        : NODE_EXTERNALS,
       sourcemap: false,
       minify: false,
       logLevel: 'warning',
@@ -295,9 +301,7 @@ function transpileFallback() {
     });
 
     if (result.diagnostics?.length) {
-      const errors = result.diagnostics.filter(
-        (d) => d.category === ts.DiagnosticCategory.Error
-      );
+      const errors = result.diagnostics.filter((d) => d.category === ts.DiagnosticCategory.Error);
       if (errors.length > 0) {
         throw new Error(
           `${file}\n${errors.map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('\n')}`
@@ -337,7 +341,9 @@ async function stageBundledServers(
     }
 
     await replaceDirectoryWithRetries(tempDir, stagedDir);
-    console.log(`[bundle:mcp] Staged bundled MCP servers at ${path.relative(PROJECT_ROOT, stagedDir)}`);
+    console.log(
+      `[bundle:mcp] Staged bundled MCP servers at ${path.relative(PROJECT_ROOT, stagedDir)}`
+    );
   } catch (error) {
     removePathIfExists(tempDir);
     throw error;

@@ -8,6 +8,18 @@
  *    the originating module lives in `main/` (not importable from renderer/preload).
  */
 
+export type {
+  TableauAnalysisPlan,
+  TableauConfigInput,
+  TableauConfigPublic,
+  TableauConnectionStatus,
+  TableauDashboardState,
+  TableauRole,
+  TableauRoleSummary,
+  TableauViewData,
+  TableauViewInfo,
+} from './tableau-types';
+
 // ---------------------------------------------------------------------------
 // MCP
 // ---------------------------------------------------------------------------

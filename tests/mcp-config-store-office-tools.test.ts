@@ -102,4 +102,13 @@ describe('MCPConfigStore Office Tools defaults', () => {
       { ...server, enabled: true },
     ]);
   });
+
+  it('includes Tableau as an implicit built-in MCP server', () => {
+    const tableau = mcpConfigStore.getEnabledServers().find((server) => server.name === 'Tableau');
+    expect(tableau).toBeDefined();
+    expect(tableau?.id).toBe('mcp-tableau-builtin');
+    expect(tableau?.enabled).toBe(true);
+    expect(tableau?.args?.[0]).toContain('tableau-server');
+    expect(tableau?.args?.[0]).not.toBe('{TABLEAU_SERVER_PATH}');
+  });
 });

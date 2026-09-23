@@ -32,6 +32,7 @@ function populateDarwinArtifacts(root: string, arch: string = 'arm64'): void {
   // Common FATAL resources
   makeFile(path.join(root, '.bundle-resources/mcp/gui-operate-server.js'));
   makeFile(path.join(root, '.bundle-resources/mcp/software-dev-server-example.js'));
+  makeFile(path.join(root, '.bundle-resources/mcp/tableau-server.js'));
   makeDir(path.join(root, 'dist-electron'));
   makeDir(path.join(root, 'dist'));
   makeDir(path.join(root, '.claude/skills'));
@@ -47,6 +48,7 @@ function populateDarwinArtifacts(root: string, arch: string = 'arm64'): void {
 function populateWin32Artifacts(root: string): void {
   makeFile(path.join(root, '.bundle-resources/mcp/gui-operate-server.js'));
   makeFile(path.join(root, '.bundle-resources/mcp/software-dev-server-example.js'));
+  makeFile(path.join(root, '.bundle-resources/mcp/tableau-server.js'));
   makeDir(path.join(root, 'dist-electron'));
   makeDir(path.join(root, 'dist'));
   makeDir(path.join(root, '.claude/skills'));
@@ -80,8 +82,8 @@ describe('pre-build-check: runChecks', () => {
 
     expect(result.failed).toBe(0);
     expect(result.hasFatal).toBe(false);
-    // 5 common + 2 darwin FATAL = 7 FATAL checks should pass
-    expect(result.passed).toBeGreaterThanOrEqual(7);
+    // 6 common + 2 darwin FATAL = 8 FATAL checks should pass
+    expect(result.passed).toBeGreaterThanOrEqual(8);
   });
 
   it('passes all FATAL checks on win32 when required artifacts exist', () => {
@@ -91,7 +93,7 @@ describe('pre-build-check: runChecks', () => {
 
     expect(result.failed).toBe(0);
     expect(result.hasFatal).toBe(false);
-    expect(result.passed).toBeGreaterThanOrEqual(7);
+    expect(result.passed).toBeGreaterThanOrEqual(8);
   });
 
   it('reports warnings for optional darwin resources that are missing', () => {

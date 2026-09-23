@@ -14,6 +14,7 @@ import {
   Plus,
   ListChecks,
   Check,
+  LayoutDashboard,
 } from 'lucide-react';
 import type { Session } from '../types';
 
@@ -38,6 +39,8 @@ export function Sidebar() {
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const setShowSettings = useAppStore((s) => s.setShowSettings);
+  const showTableauDashboard = useAppStore((s) => s.showTableauDashboard);
+  const setShowTableauDashboard = useAppStore((s) => s.setShowTableauDashboard);
   const {
     deleteSession,
     batchDeleteSessions,
@@ -149,6 +152,7 @@ export function Sidebar() {
   const handleSessionClick = useCallback(
     async (sessionId: string) => {
       setShowSettings(false);
+      setShowTableauDashboard(false);
 
       if (activeSessionId === sessionId) return;
 
@@ -192,6 +196,7 @@ export function Sidebar() {
       setActiveSession,
       setMessages,
       setShowSettings,
+      setShowTableauDashboard,
       setTraceSteps,
     ]
   );
@@ -199,6 +204,12 @@ export function Sidebar() {
   const handleNewSession = () => {
     setActiveSession(null);
     setShowSettings(false);
+    setShowTableauDashboard(false);
+  };
+
+  const handleTableauDashboard = () => {
+    setShowSettings(false);
+    setShowTableauDashboard(true);
   };
 
   const handleDeleteSession = (e: React.MouseEvent, sessionId: string) => {
@@ -253,6 +264,17 @@ export function Sidebar() {
 
         <div className="px-3 py-3 border-t border-border-muted flex flex-col items-center gap-2">
           <button
+            onClick={handleTableauDashboard}
+            className={`w-9 h-9 rounded-2xl flex items-center justify-center transition-colors ${
+              showTableauDashboard
+                ? 'bg-accent-muted/20 text-accent'
+                : 'hover:bg-surface-hover text-text-secondary'
+            }`}
+            title={t('sidebar.tableauDashboard')}
+          >
+            <LayoutDashboard className="w-4 h-4" />
+          </button>
+          <button
             onClick={toggleTheme}
             className="w-9 h-9 rounded-2xl flex items-center justify-center hover:bg-surface-hover transition-colors text-text-secondary"
             title={t('sidebar.themeToggle')}
@@ -260,7 +282,10 @@ export function Sidebar() {
             {themeIcon}
           </button>
           <button
-            onClick={() => setShowSettings(true)}
+            onClick={() => {
+              setShowTableauDashboard(false);
+              setShowSettings(true);
+            }}
             className="w-9 h-9 rounded-2xl flex items-center justify-center hover:bg-surface-hover transition-colors text-text-secondary relative"
             title={t('sidebar.settings')}
           >
@@ -471,9 +496,28 @@ export function Sidebar() {
         </div>
       ) : (
         <div className="px-3 py-3 border-t border-border-muted">
+          <button
+            onClick={handleTableauDashboard}
+            className={`mb-2 w-full flex items-center gap-2 rounded-xl px-3 py-2.5 text-left transition-colors ${
+              showTableauDashboard
+                ? 'bg-accent-muted/20 text-accent'
+                : 'bg-background/50 text-text-secondary hover:text-text-primary hover:bg-surface-hover'
+            }`}
+          >
+            <LayoutDashboard className="w-4 h-4 flex-shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium">{t('sidebar.tableauDashboard')}</div>
+              <div className="text-[11px] text-text-muted truncate">
+                {t('sidebar.tableauDashboardHint')}
+              </div>
+            </div>
+          </button>
           <div className="flex items-center gap-2 rounded-2xl bg-background/50 px-3 py-2.5">
             <button
-              onClick={() => setShowSettings(true)}
+              onClick={() => {
+                setShowTableauDashboard(false);
+                setShowSettings(true);
+              }}
               className="flex-1 min-w-0 flex items-center gap-2 text-left text-text-secondary hover:text-text-primary transition-colors"
             >
               <Settings className="w-4 h-4 flex-shrink-0" />

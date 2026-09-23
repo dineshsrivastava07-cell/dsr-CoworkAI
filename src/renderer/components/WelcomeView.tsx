@@ -14,6 +14,7 @@ import {
   Paperclip,
   BookOpen,
   FileSearch,
+  LayoutDashboard,
 } from 'lucide-react';
 
 type AttachedFile = {
@@ -44,6 +45,7 @@ export function WelcomeView() {
   const isConfigured = useAppStore((state) => state.isConfigured);
   const setShowSettings = useAppStore((state) => state.setShowSettings);
   const setSettingsTab = useAppStore((state) => state.setSettingsTab);
+  const setShowTableauDashboard = useAppStore((state) => state.setShowTableauDashboard);
   const canSubmit = prompt.trim().length > 0 || pastedImages.length > 0 || attachedFiles.length > 0;
 
   const handleSelectFolder = async () => {
@@ -479,6 +481,17 @@ export function WelcomeView() {
 
         {/* Quick Action Tags */}
         <div className="flex flex-wrap gap-2 justify-center px-3">
+          <button
+            type="button"
+            onClick={() => setShowTableauDashboard(true)}
+            className="inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent-muted px-3 py-2 text-sm text-accent transition-colors hover:bg-accent/15"
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            <span>AI Analytics</span>
+            <span className="ml-1 px-1.5 py-px text-[9px] rounded bg-accent/10 text-accent">
+              Tableau
+            </span>
+          </button>
           {quickTags.map((tag) => (
             <button
               key={tag.id}

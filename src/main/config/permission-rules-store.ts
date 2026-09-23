@@ -38,6 +38,12 @@ const DEFAULT_RULES: PermissionRule[] = [
   // anything but SELECT/WITH/SHOW/EXPLAIN/DESCRIBE) — writes still require the
   // gated infra_propose_fix/infra_execute_fix flow above.
   { tool: 'mcp__Infra_RCA__infra_query_db', action: 'allow' },
+  { tool: 'mcp__Tableau__tableau_analyze_question', action: 'allow' },
+  { tool: 'mcp__Tableau__tableau_connection_status', action: 'allow' },
+  { tool: 'mcp__Tableau__tableau_list_views', action: 'allow' },
+  { tool: 'mcp__Tableau__tableau_get_view_data', action: 'allow' },
+  { tool: 'mcp__Tableau__tableau_get_role_summary', action: 'allow' },
+  { tool: 'mcp__Tableau__tableau_refresh_role_summaries', action: 'allow' },
 ];
 
 const VALID_ACTIONS: ReadonlySet<PermissionRule['action']> = new Set(['allow', 'deny', 'ask']);

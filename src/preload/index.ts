@@ -46,6 +46,13 @@ import type {
   PairedUser,
   PairingRequest,
   RemoteSessionMapping,
+  TableauConfigInput,
+  TableauAnalysisPlan,
+  TableauConfigPublic,
+  TableauConnectionStatus,
+  TableauDashboardState,
+  TableauViewData,
+  TableauViewInfo,
 } from '../shared/ipc-types';
 import type {
   RpaRecipeDefinitionInput,
@@ -258,6 +265,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getTools: (): Promise<McpTool[]> => ipcRenderer.invoke('mcp.getTools'),
     getServerStatus: (): Promise<McpServerStatus[]> => ipcRenderer.invoke('mcp.getServerStatus'),
     getPresets: (): Promise<McpPresetsMap> => ipcRenderer.invoke('mcp.getPresets'),
+  },
+
+  tableau: {
+    getConfig: (): Promise<TableauConfigPublic> => ipcRenderer.invoke('tableau.getConfig'),
+    saveConfig: (
+      input: TableauConfigInput
+    ): Promise<{ success: boolean; config?: TableauConfigPublic; error?: string }> =>
+      ipcRenderer.invoke('tableau.saveConfig', input),
+    testConnection: (): Promise<TableauConnectionStatus> =>
+      ipcRenderer.invoke('tableau.testConnection'),
+    getDashboardState: (refresh = false): Promise<TableauDashboardState> =>
+      ipcRenderer.invoke('tableau.getDashboardState', refresh),
+    refreshSummaries: (): Promise<TableauDashboardState> =>
+      ipcRenderer.invoke('tableau.refreshSummaries'),
+    listViews: (): Promise<TableauViewInfo[]> => ipcRenderer.invoke('tableau.listViews'),
+    getViewData: (viewId: string, maxRows = 1_000): Promise<TableauViewData> =>
+      ipcRenderer.invoke('tableau.getViewData', viewId, maxRows),
+    getViewsData: (viewIds: string[], maxRows = 1_000): Promise<TableauViewData[]> =>
+      ipcRenderer.invoke('tableau.getViewsData', viewIds, maxRows),
+    analyzeQuestion: (input: {
+      question: string;
+      role?: 'retail' | 'merchandiser' | 'planner';
+      domain?: string;
+      maxRows?: number;
+    }): Promise<TableauAnalysisPlan> => ipcRenderer.invoke('tableau.analyzeQuestion', input),
+    open: (): Promise<void> => ipcRenderer.invoke('tableau.open'),
   },
 
   // Google Workspace connector methods
@@ -638,6 +671,25 @@ declare global {
         getTools: () => Promise<McpTool[]>;
         getServerStatus: () => Promise<McpServerStatus[]>;
         getPresets: () => Promise<McpPresetsMap>;
+      };
+      tableau: {
+        getConfig: () => Promise<TableauConfigPublic>;
+        saveConfig: (
+          input: TableauConfigInput
+        ) => Promise<{ success: boolean; config?: TableauConfigPublic; error?: string }>;
+        testConnection: () => Promise<TableauConnectionStatus>;
+        getDashboardState: (refresh?: boolean) => Promise<TableauDashboardState>;
+        refreshSummaries: () => Promise<TableauDashboardState>;
+        listViews: () => Promise<TableauViewInfo[]>;
+        getViewData: (viewId: string, maxRows?: number) => Promise<TableauViewData>;
+        getViewsData: (viewIds: string[], maxRows?: number) => Promise<TableauViewData[]>;
+        analyzeQuestion: (input: {
+          question: string;
+          role?: 'retail' | 'merchandiser' | 'planner';
+          domain?: string;
+          maxRows?: number;
+        }) => Promise<TableauAnalysisPlan>;
+        open: () => Promise<void>;
       };
       google: {
         getStatus: () => Promise<GoogleConnectionStatus>;

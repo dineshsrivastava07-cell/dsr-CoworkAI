@@ -16,7 +16,7 @@ Built on top of the Electron + React stack, V-Coworker gives you:
 - **Chief Orchestrator model** — a single agent that operates across six domains (desktop/RPA, IT infrastructure, project planning, financial analysis, corporate communications, web navigation), each backed by its own real tool, plus `spawn_subagent` for delegating an isolated sub-task to a domain-specific persona
 - **Autonomous Mode** — opt-in auto-approval of tool calls so scheduled/unattended tasks don't stall waiting for a click, without ever overriding explicit deny rules or irreversible-action confirmations
 - In-chat model switcher — change provider/model (Ollama, Gemini, OpenAI, Anthropic, OpenRouter) without leaving the conversation
-- One-click MCP (Model Context Protocol) tool integration, plus six bundled first-party MCP servers (see below)
+- One-click MCP (Model Context Protocol) tool integration, plus eight bundled first-party MCP servers (see below)
 - RPA recipes — record semantic desktop actions once, bind an encrypted credential profile, capture before/after evidence, and replay them through autonomous scheduled or HTTP-triggered agent jobs
 - Advanced remote infrastructure RCA — diagnose Linux/Windows servers, network gear, printers, UPS, and databases over SSH/WinRM/SNMP/DB, with explicit WinRM Basic/NTLM/HTTPS or native-ticket Kerberos settings, expert quick/full health assessments, read-only lookup queries, and proposed fixes that auto-verify after approval
 - Native remote desktop launch — open Windows RDP, macOS Screen Sharing/VNC, or installed Linux RDP/VNC clients from an SSH/WinRM host target after a bounded port preflight; credentials remain in the native client
@@ -51,7 +51,7 @@ MCP Docker and clickhouse-cloud are intentionally outside this project scope and
 | **Local LLM**            | Ollama + Gemma 4 (26b / e4b) — runs 100% on your machine                                                                                                                                                                                                                                                                                                         |
 | **Multi-provider**       | Switch between Ollama, Gemini, OpenAI (ChatGPT), Anthropic, and OpenRouter from the chat window                                                                                                                                                                                                                                                                  |
 | **Autonomous Mode**      | Auto-approve tool calls that would otherwise wait on a permission dialog — for unattended/scheduled work                                                                                                                                                                                                                                                         |
-| **MCP Tools**            | 1-click install of Model Context Protocol servers, plus 6 bundled first-party servers                                                                                                                                                                                                                                                                            |
+| **MCP Tools**            | 1-click install of Model Context Protocol servers, plus 8 bundled first-party servers                                                                                                                                                                                                                                                                            |
 | **Browser Automation**   | Full page navigation, click, type, snapshot via the Chrome MCP server                                                                                                                                                                                                                                                                                            |
 | **Desktop / App RPA**    | Click, type, drag, scroll, screenshot, vision-based element location, app tracking, runtime preflight, and an emergency-stop safety switch via GUI_Operate on macOS, Windows and Linux graphical sessions                                                                                                                                                        |
 | **RPA Recipes**          | Record a sequence of desktop actions once, replay it reliably against any app/ERP for recurring daily tasks — replay re-locates targets semantically instead of trusting stale coordinates                                                                                                                                                                       |
@@ -61,6 +61,7 @@ MCP Docker and clickhouse-cloud are intentionally outside this project scope and
 | **Google Workspace**     | Gmail, Drive, and Calendar access with bundled OAuth                                                                                                                                                                                                                                                                                                             |
 | **OCR**                  | Text extraction from images via Tesseract                                                                                                                                                                                                                                                                                                                        |
 | **Weather**              | Live weather data via Open-Meteo                                                                                                                                                                                                                                                                                                                                 |
+| **Tableau**              | Autonomous read-only analysis across up to three question-relevant dashboards, exact Tableau filters, State/Zone/Region/Store coverage, Indian value-retail questions, and cached Retail, Merchandiser, and Planner summaries for VPN/local-network deployments                                                                                                  |
 | **Skills**               | Reusable agent skill protocols stored locally                                                                                                                                                                                                                                                                                                                    |
 | **Sandbox**              | Lima (macOS) / WSL (Windows) process isolation                                                                                                                                                                                                                                                                                                                   |
 | **Memory**               | Long-term and short-term persistent memory, with untrusted-context and no-fabrication guardrails                                                                                                                                                                                                                                                                 |
@@ -153,9 +154,26 @@ Edit **Settings -> API -> Ollama** and set any model tag pulled via `ollama pull
 
 ---
 
+## V-Mart Tableau AI Analytics
+
+Select **AI Analytics** below **How can I help you today?** or from the sidebar. Retail starts with **Festive Performance** and **Business Performance** as its default views. For each analytical question, V-Coworker can autonomously rank the authorized Tableau catalogue and read up to three complementary dashboards; users can still override the selection with the **Available views** checkboxes, capped at three.
+
+The read-only workflow includes:
+
+- question-aware dashboard selection for sales, product, festive, KPI, State, Zone, Region, Store, inventory, margin, and recommendation requests;
+- exact Tableau `vf_` filters when a requested value is observed in the selected data;
+- visible State/Zone/Region/Store coverage, including governed filters that are configured but not emitted in a particular CSV export;
+- source view, applied filters, row coverage, truncation, and selection reasons in every analysis packet;
+- grounded comparison with user-attached chat files after reconciling period, grain, units, and metric definitions; and
+- pre-built questions for V-Mart Retail, Zone, RM, Store, Planning & SCM, Warehouse & Logistics, Finance, Omni, Marketing, VM, CRM, HR, Buying, Sourcing, and Loss Prevention teams.
+
+Tableau credentials stay in the encrypted Electron main process. The renderer and model-facing MCP child receive no Tableau password. See [Tableau integration](./TABLEAU-INTEGRATION.md) for operations and [Architecture](./Architecture.md#tableau-autonomous-analytics-flow) for the end-to-end flow diagram and trust boundaries.
+
+---
+
 ## Architecture
 
-See [Architecture.md](./Architecture.md) for the full system design with flow diagrams.
+See [Architecture.md](./Architecture.md) for the full system design, including the [autonomous Tableau analytics flow](./Architecture.md#tableau-autonomous-analytics-flow).
 
 ## Verification
 
@@ -171,6 +189,8 @@ npm test -- --run
 
 Focused safety and workflow suites cover permissions, delegated agents, read-only database queries, encrypted-store migration, infrastructure proposal safety, Office/Gantt behavior, and RPA recipe storage. Live provider, database, desktop, browser, spreadsheet-engine, packaging, and stakeholder acceptance require their corresponding fixtures and are reported separately from local unit-test evidence.
 
+The current Tableau change set passed TypeScript, lint with zero errors, 25 focused tests across six files, the real MCP stdio-to-broker round trip, and the complete local suite of 1,413 tests across 188 files. A packaged macOS run authenticated to the live V-Mart Tableau Server, listed 606 authorized views, autonomously selected three dashboards for a State/Zone/Region/Store question, invoked Tableau tools from the model session, and produced a source-labelled answer with explicit coverage limits. The 615 MB ULMO DMG passed `hdiutil verify`; the app bundle passed deep signature verification.
+
 ---
 
 ## Project Structure
@@ -182,7 +202,8 @@ dsr-CoworkAI/
 │   │   ├── agent/     # Agent runner, permission hook, session loop
 │   │   ├── config/    # Config store + Ollama/Gemini/OpenAI/Anthropic auth
 │   │   ├── mcp/       # MCP manager + bundled servers (gui-operate, office-tools,
-│   │   │              #   google-workspace, ocr-tools, weather-tools, infra-rca)
+│   │   │              #   google-workspace, ocr-tools, weather-tools, infra-rca, tableau)
+│   │   ├── tableau/   # Tableau REST client, encrypted config, summaries + broker
 │   │   ├── remote/    # Slack (and other channel) + VNC remote control
 │   │   ├── sandbox/   # Lima / WSL isolation
 │   │   ├── skills/    # Skill protocol registry
@@ -231,6 +252,7 @@ Files are saved to your Desktop (or `WORKSPACE_DIR` env var) by default.
 | **OCR_Tools**        | Text extraction from images via Tesseract                                                                                                                                                                                                                                                                                                                                                                  |
 | **Weather_Tools**    | Live weather data via Open-Meteo                                                                                                                                                                                                                                                                                                                                                                           |
 | **Infra_RCA**        | Expert remote diagnostics over SSH/WinRM/SNMP/DB — diagnoses OS/service/process/CPU/disk/storage/RAM/network/hardware/virtualization/security/DB/printer/power health where supported, exposes capabilities and quick/full assessments, runs read-only DB lookups, and proposes a fix that auto-verifies itself after execution, but never executes one without your explicit approval in the conversation |
+| **Tableau**          | Autonomous read-only view discovery and CSV-backed analysis across up to three relevant dashboards through an encrypted main-process credential store; includes exact filters, geographic coverage, attached-file grounding, pre-built domain questions, and cached Retail, Merchandiser, and Planner summaries. See [Tableau integration](./TABLEAU-INTEGRATION.md).                                      |
 
 Additional servers (Notion, Software_Development, or any custom MCP server) can be added from **Settings -> MCP Servers**.
 

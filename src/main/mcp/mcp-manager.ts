@@ -435,6 +435,21 @@ export class MCPManager {
     }
   }
 
+  private async getTableauEnvOverrides(): Promise<Record<string, string>> {
+    try {
+      const { getTableauBrokerConnectionInfo } = await import('../tableau/tableau-broker');
+      const info = getTableauBrokerConnectionInfo();
+      if (!info) return {};
+      return {
+        TABLEAU_BROKER_PORT: String(info.port),
+        TABLEAU_BROKER_SECRET: info.secret,
+      };
+    } catch (error) {
+      logWarn('[MCPManager] Could not read Tableau broker connection info:', error);
+      return {};
+    }
+  }
+
   /** Inject decrypted profiles into the initial GUI child environment; the child loads and clears them before spawning helpers. */
   private async getRpaCredentialEnvOverrides(): Promise<Record<string, string>> {
     try {
@@ -853,6 +868,10 @@ export class MCPManager {
     return this.getMcpServerPath('infra-rca-server.ts');
   }
 
+  private getTableauServerPath(): string {
+    return this.getMcpServerPath('tableau-server.ts');
+  }
+
   /**
    * Connect to a single MCP server
    */
@@ -921,7 +940,8 @@ export class MCPManager {
         config.name === 'Google_Workspace' ||
         config.name === 'Google Workspace' ||
         config.name === 'Infra_RCA' ||
-        config.name === 'Infra RCA';
+        config.name === 'Infra RCA' ||
+        config.name === 'Tableau';
       const isOldConfig =
         (command === 'npx' || command.endsWith('/npx')) &&
         args.includes('-y') &&
@@ -964,6 +984,9 @@ export class MCPManager {
         if (arg === '{INFRA_RCA_SERVER_PATH}') {
           return this.getInfraRcaServerPath();
         }
+        if (arg === '{TABLEAU_SERVER_PATH}') {
+          return this.getTableauServerPath();
+        }
         return arg;
       });
 
@@ -1005,6 +1028,10 @@ export class MCPManager {
       // model's context.
       if (config.name === 'Infra_RCA' || config.name === 'Infra RCA') {
         Object.assign(config.env ?? (config.env = {}), await this.getInfraRcaEnvOverrides());
+      }
+
+      if (config.name === 'Tableau') {
+        Object.assign(config.env ?? (config.env = {}), await this.getTableauEnvOverrides());
       }
 
       if (config.name === 'GUI_Operate' || config.name === 'GUI Operate') {
@@ -1055,6 +1082,7 @@ export class MCPManager {
         ANTHROPIC_AUTH_TOKEN: env.ANTHROPIC_AUTH_TOKEN?.trim() ? 'set' : 'unset',
         GOOGLE_TOKEN_BROKER_SECRET: env.GOOGLE_TOKEN_BROKER_SECRET?.trim() ? 'set' : 'unset',
         INFRA_RCA_BROKER_SECRET: env.INFRA_RCA_BROKER_SECRET?.trim() ? 'set' : 'unset',
+        TABLEAU_BROKER_SECRET: env.TABLEAU_BROKER_SECRET?.trim() ? 'set' : 'unset',
       });
 
       // In production, set NODE_PATH to include unpacked node_modules

@@ -6,7 +6,9 @@
  * Exposes HTTP endpoints on 127.0.0.1:19888 for external tools (e.g. Claude Code)
  * to control app page navigation programmatically:
  *   GET /status           → current page state
- *   GET /navigate?page=X  → navigate to welcome, settings, or session pages
+ *   GET /tableau-status   → sanitized Tableau dashboard readiness
+ *   POST /tableau-refresh → refresh read-only Tableau role summaries
+ *   GET /navigate?page=X  → navigate to welcome, settings, Tableau, or session pages
  *
  * Dependencies: electron (BrowserWindow)
  */
@@ -14,6 +16,7 @@ import * as http from 'http';
 import { URL } from 'url';
 import { BrowserWindow } from 'electron';
 import { log, logError, logWarn } from './utils/logger';
+import { tableauService } from './tableau/tableau-service';
 
 const PORT = 19888;
 const HOST = '127.0.0.1';
@@ -58,8 +61,11 @@ function execJS(win: BrowserWindow, code: string): Promise<unknown> {
  * Routes:
  *   GET /navigate?page=welcome
  *   GET /navigate?page=settings&tab=api
+ *   GET /navigate?page=tableau
  *   GET /navigate?page=session&id=xxx
  *   GET /status
+ *   GET /tableau-status
+ *   POST /tableau-refresh
  */
 export function startNavServer(getMainWindow: () => BrowserWindow | null): void {
   if (server) return;
@@ -69,9 +75,12 @@ export function startNavServer(getMainWindow: () => BrowserWindow | null): void 
       const url = new URL(req.url || '/', `http://${HOST}:${PORT}`);
       const pathname = url.pathname;
 
-      // Only GET is supported
-      if (req.method !== 'GET') {
-        return json(res, 405, { ok: false, error: 'Method Not Allowed. Use GET.' });
+      const isTableauRefresh = pathname === '/tableau-refresh' && req.method === 'POST';
+      if (req.method !== 'GET' && !isTableauRefresh) {
+        return json(res, 405, {
+          ok: false,
+          error: 'Method Not Allowed. Use GET, or POST for /tableau-refresh.',
+        });
       }
 
       if (pathname === '/navigate') {
@@ -79,10 +88,10 @@ export function startNavServer(getMainWindow: () => BrowserWindow | null): void 
         const tab = url.searchParams.get('tab') || undefined;
         const sessionId = url.searchParams.get('id') || undefined;
 
-        if (!page || !['welcome', 'settings', 'session'].includes(page)) {
+        if (!page || !['welcome', 'settings', 'tableau', 'session'].includes(page)) {
           return json(res, 400, {
             ok: false,
-            error: 'Invalid page. Use: welcome, settings, session',
+            error: 'Invalid page. Use: welcome, settings, tableau, session',
           });
         }
 
@@ -141,6 +150,7 @@ export function startNavServer(getMainWindow: () => BrowserWindow | null): void 
           const parsed = JSON.parse(state);
           let currentPage = 'welcome';
           if (parsed.showSettings) currentPage = 'settings';
+          else if (parsed.showTableauDashboard) currentPage = 'tableau';
           else if (parsed.activeSessionId) currentPage = 'session';
 
           return json(res, 200, {
@@ -155,7 +165,57 @@ export function startNavServer(getMainWindow: () => BrowserWindow | null): void 
         }
       }
 
-      json(res, 404, { ok: false, error: 'Not found. Use /navigate or /status' });
+      if (pathname === '/tableau-status') {
+        const win = getMainWindow();
+        if (!win || win.isDestroyed()) {
+          return json(res, 503, { ok: false, error: 'No active window' });
+        }
+
+        try {
+          const state = (await execJS(
+            win,
+            `JSON.stringify(window.__getTableauDashboardStatus ? window.__getTableauDashboardStatus() : { mounted: false })`
+          )) as string;
+          const parsed = JSON.parse(state) as Record<string, unknown>;
+          if (!parsed.mounted) {
+            return json(res, 503, { ok: false, error: 'Tableau dashboard is not mounted' });
+          }
+          return json(res, 200, { ok: true, ...parsed });
+        } catch (err) {
+          logError('[NavServer] /tableau-status error:', err);
+          return json(res, 500, { ok: false, error: 'Failed to read Tableau dashboard state' });
+        }
+      }
+
+      if (isTableauRefresh) {
+        try {
+          const summaries = await tableauService.refreshSummaries();
+          return json(res, 200, {
+            ok: true,
+            authenticated: true,
+            roles: Object.fromEntries(
+              Object.entries(summaries).map(([role, summary]) => [
+                role,
+                {
+                  status: summary.status,
+                  highlightCount: summary.highlights.length,
+                  definitionVersion: summary.definitionVersion || null,
+                  loadedRows: summary.loadedRows || 0,
+                  totalRows: summary.totalRows || 0,
+                },
+              ])
+            ),
+          });
+        } catch (err) {
+          logError('[NavServer] /tableau-refresh error:', err);
+          return json(res, 502, { ok: false, error: 'Failed to refresh Tableau summaries' });
+        }
+      }
+
+      json(res, 404, {
+        ok: false,
+        error: 'Not found. Use /navigate, /status, /tableau-status, or /tableau-refresh',
+      });
     } catch (err) {
       logError('[NavServer] Unexpected error:', err);
       if (!res.headersSent) {

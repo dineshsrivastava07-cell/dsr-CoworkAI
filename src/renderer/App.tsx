@@ -38,6 +38,9 @@ const ConfigModal = lazy(() =>
 const SettingsPanel = lazy(() =>
   import('./components/SettingsPanel').then((module) => ({ default: module.SettingsPanel }))
 );
+const TableauDashboard = lazy(() =>
+  import('./components/TableauDashboard').then((module) => ({ default: module.TableauDashboard }))
+);
 
 function MainPanelFallback() {
   return (
@@ -62,6 +65,7 @@ function App() {
   const settings = useSettings();
   const systemDarkMode = useSystemDarkMode();
   const { showSettings } = useSettingsState();
+  const showTableauDashboard = useAppStore((s) => s.showTableauDashboard);
   const { sidebarCollapsed } = useLayoutState();
   const { showConfigModal, isConfigured, appConfig } = useConfigModalState();
   const globalNotice = useGlobalNotice();
@@ -190,6 +194,16 @@ function App() {
                 <SettingsPanel onClose={() => setShowSettings(false)} />
               </Suspense>
             </PanelErrorBoundary>
+          ) : showTableauDashboard ? (
+            <PanelErrorBoundary
+              name="TableauDashboard"
+              resetKey="tableau"
+              fallback={<MainPanelFallback />}
+            >
+              <Suspense fallback={<MainPanelFallback />}>
+                <TableauDashboard />
+              </Suspense>
+            </PanelErrorBoundary>
           ) : activeSessionId ? (
             <PanelErrorBoundary
               name="ChatView"
@@ -206,7 +220,7 @@ function App() {
         </main>
 
         {/* Context Panel - only show when in session and not in settings */}
-        {activeSessionId && !showSettings && (
+        {activeSessionId && !showSettings && !showTableauDashboard && (
           <PanelErrorBoundary
             name="ContextPanel"
             resetKey={activeSessionId}

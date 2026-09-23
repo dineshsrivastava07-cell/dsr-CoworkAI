@@ -99,6 +99,18 @@ export const MCP_SERVER_PRESETS: Record<
       // infra-rca-broker.ts — never passed to this server as env or config.
     },
   },
+  tableau: {
+    name: 'Tableau',
+    type: 'stdio',
+    command: 'node',
+    args: ['{TABLEAU_SERVER_PATH}'],
+    env: {},
+    requiresEnv: [],
+    envDescription: {
+      // Credentials stay in the main process encrypted store. The child receives
+      // only an ephemeral loopback broker port and per-launch bearer secret.
+    },
+  },
 };
 
 function isOfficeToolsServerName(name: string): boolean {
@@ -192,6 +204,11 @@ class MCPConfigStore {
     const hasInfraRcaConfig = servers.some((server) => server.name === 'Infra_RCA');
     if (!hasInfraRcaConfig) {
       enabledServers.push(this.createBuiltinInfraRcaConfig());
+    }
+
+    const hasTableauConfig = servers.some((server) => server.name === 'Tableau');
+    if (!hasTableauConfig) {
+      enabledServers.push(this.createBuiltinTableauConfig());
     }
 
     return enabledServers;
@@ -309,6 +326,10 @@ class MCPConfigStore {
     return this.getMcpServerPath('infra-rca-server.ts');
   }
 
+  private getTableauServerPath(): string | null {
+    return this.getMcpServerPath('tableau-server.ts');
+  }
+
   private createBuiltinOfficeToolsConfig(): MCPServerConfig {
     const preset = MCP_SERVER_PRESETS['office-tools'];
     return {
@@ -329,6 +350,18 @@ class MCPConfigStore {
         arg === '{INFRA_RCA_SERVER_PATH}' ? this.getInfraRcaServerPath() || arg : arg
       ),
       id: 'mcp-infra-rca-builtin',
+      enabled: true,
+    };
+  }
+
+  private createBuiltinTableauConfig(): MCPServerConfig {
+    const preset = MCP_SERVER_PRESETS.tableau;
+    return {
+      ...preset,
+      args: preset.args?.map((arg) =>
+        arg === '{TABLEAU_SERVER_PATH}' ? this.getTableauServerPath() || arg : arg
+      ),
+      id: 'mcp-tableau-builtin',
       enabled: true,
     };
   }
@@ -365,6 +398,9 @@ class MCPConfigStore {
           }
           if (arg === '{INFRA_RCA_SERVER_PATH}') {
             return this.getInfraRcaServerPath() || arg;
+          }
+          if (arg === '{TABLEAU_SERVER_PATH}') {
+            return this.getTableauServerPath() || arg;
           }
           return arg;
         }),

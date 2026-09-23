@@ -48,6 +48,12 @@ function buildCheckList(platform, arch) {
       severity: 'fatal',
     },
     {
+      label: 'Tableau MCP server bundle',
+      relPath: '.bundle-resources/mcp/tableau-server.js',
+      type: 'file',
+      severity: 'fatal',
+    },
+    {
       label: 'Electron main process output (dist-electron/)',
       relPath: 'dist-electron',
       type: 'dir',

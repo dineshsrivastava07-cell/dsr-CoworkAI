@@ -44,6 +44,7 @@ graph TB
     subgraph UI["Renderer Process (React + Vite)"]
         WV[WelcomeView]
         CV[ChatView + ModelSwitcher]
+        TAW[Tableau AI Analytics Workspace]
         SP[SettingsPanel]
         SB[Sidebar]
         RCP[RemoteControlPanel]
@@ -59,6 +60,8 @@ graph TB
         SBX[Sandbox Manager]
         REM[Remote Manager]
         SCH[Scheduler\nfast-deny for unattended runs]
+        TS[Tableau Service + Planner\nread-only analysis]
+        TB[Tableau Loopback Broker\nephemeral bearer secret]
     end
 
     subgraph PROVIDERS["Model Providers"]
@@ -78,12 +81,14 @@ graph TB
         OCR[OCR_Tools\nTesseract]
         WEATHER[Weather_Tools\nOpen-Meteo]
         INFRA[Infra_RCA\nSSH/WinRM/SNMP/DB diagnostics]
+        TABLEAU[Tableau\n6 read-only analytics tools]
     end
 
     subgraph EXT["External Integrations"]
         SLACK[Slack / other channels]
         NGROK[ngrok Tunnel]
         VNC[VNC Remote Desktop]
+        TVM[V-Mart Tableau Server\nREST API + authorized views]
     end
 
     UI <-->|IPC / preload bridge| MAIN
@@ -94,7 +99,11 @@ graph TB
     AR -->|API key| ANTH
     AR -->|API key| OPENROUTER
     AR -->|tool calls, permission-gated| MCP
-    MCP --> CHROME & GUIOP & OFFICE & GWORK & OCR & WEATHER & INFRA
+    MCP --> CHROME & GUIOP & OFFICE & GWORK & OCR & WEATHER & INFRA & TABLEAU
+    TAW -->|typed IPC, no credentials returned| TS
+    TABLEAU -->|localhost HTTP + launch secret| TB
+    TB --> TS
+    TS -->|REST sign-in, list views, CSV export, vf_ filters| TVM
     AR -->|skill execution| SKL
     AR -->|read/write, no-fabrication guardrail| MEM
     AR -->|shell isolation| SBX
@@ -220,10 +229,70 @@ flowchart LR
     Reg --> OCR[OCR_Tools]
     Reg --> WX[Weather_Tools]
     Reg --> IRCA[Infra_RCA\ndiagnose / propose_fix / execute_fix]
+    Reg --> TAB[Tableau\nautonomous read-only analytics]
     Reg --> CUS[Optional presets:\nNotion, Software_Development,\nany custom MCP server]
-    FS & BR & RPA & OT & GW & OCR & WX & IRCA & CUS -->|result, truncated if >20,000 chars| MCPMgr
+    FS & BR & RPA & OT & GW & OCR & WX & IRCA & TAB & CUS -->|result, truncated if >20,000 chars| MCPMgr
     MCPMgr -->|result| AR
 ```
+
+---
+
+## Tableau Autonomous Analytics Flow
+
+Tableau credentials remain in the encrypted Electron main-process store. The renderer and model-facing MCP child never receive the username or password. Both the dedicated analytics workspace and ordinary V-Coworker chat converge on the same read-only `TableauService` and autonomous planner.
+
+```mermaid
+flowchart TD
+    U[User asks about sales, product, KPI, festive,\nState, Zone, Region, Store, or recommendations]
+    A{Entry point}
+    U --> A
+    A -->|How can I help you today / sidebar| W[AI Analytics workspace]
+    A -->|Normal chat with optional attachments| C[AgentRunner]
+
+    W --> IPC[tableau.analyzeQuestion IPC]
+    C --> MCPQ[tableau_analyze_question MCP tool]
+    MCPQ --> B[Loopback-only Tableau broker\nrandom per-launch bearer secret]
+    IPC --> S[TableauService]
+    B --> S
+
+    S --> L[List authorized Tableau views]
+    L --> P[Question planner\nscore intent + role + domain]
+    P --> POOL[Bounded candidate pool]
+    POOL --> E[Export bounded CSV samples]
+    E --> GEO[Detect State / Zone / Region / Store\nincluding Tableau caption aliases]
+    GEO --> PICK[Select up to 3 complementary dashboards]
+    PICK --> F{Exact requested values found?}
+    F -->|yes| VF[Re-query with Tableau vf_ filters]
+    F -->|no| PACK[Build evidence packet]
+    VF --> PACK
+
+    PACK --> G[Grounded model analysis]
+    FILES[User-attached files] --> G
+    G --> R[Answer with sources, filters, row coverage,\ntruncation, facts, hypotheses, and recommendations]
+
+    PICK -. manual override .-> M[Available views checkboxes\nmaximum 3]
+    M --> E
+```
+
+### Selection and evidence rules
+
+- The planner ranks all authorized views by the user's question, selected V-Mart role/domain, dashboard metadata, export readability, and incremental geographic coverage. It chooses at most three dashboards.
+- Retail defaults remain **Festive Performance** and **Business Performance** until a question requires more relevant evidence. Manual checkbox selection remains available and is capped at three views.
+- Exact values observed in the selected exports can be reapplied through Tableau REST `vf_<field>` filters. Filters are bounded and read-only.
+- State, Zone, Region, and Store aliases such as `ATTR(State Name)`, `Zone_Name`, `[Region]`, and `Store Name` are normalized. A governed filter that is configured in Tableau but absent from the current CSV is labelled **Configured**, not **Not available**.
+- Exported samples are bounded and may be truncated. Every analysis packet carries the view identity, selection reason, applied filters, loaded/exported rows, truncation status, and geographic coverage.
+- If files are attached to chat, the model must distinguish file evidence from Tableau evidence and reconcile period, grain, units, and metric definitions before comparing them.
+- Recommendations are advisory. The connector cannot modify Tableau workbooks, data sources, permissions, or business systems.
+
+### Tableau process boundaries
+
+| Boundary                 | Contract and control                                                                                                                                                 |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Renderer -> main process | Typed IPC for config, status, view data, autonomous analysis, and opening Tableau. Password is accepted only on save and never returned.                             |
+| MCP child -> broker      | Loopback HTTP with a random per-launch bearer secret. JSON requests are size-bounded and validated.                                                                  |
+| Main process -> Tableau  | Tableau REST authentication, authorized view discovery, bounded CSV export, and exact `vf_` filtering. Credentials are redacted from errors and logs.                |
+| Tableau -> model         | Only bounded, source-labelled data packets and calculated context; no Tableau credentials. Cloud-model use remains subject to the configured provider's data policy. |
+| Model -> user            | Evidence-linked findings with filter context, coverage/truncation, explicit uncertainty, and separated facts, hypotheses, and recommendations.                       |
 
 ---
 
